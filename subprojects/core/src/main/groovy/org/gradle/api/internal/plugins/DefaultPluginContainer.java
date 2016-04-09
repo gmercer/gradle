@@ -15,30 +15,49 @@
  */
 package org.gradle.api.internal.plugins;
 
-import groovy.lang.Closure;
+import com.google.common.base.Predicate;
+import com.google.common.collect.Iterables;
 import org.gradle.api.Action;
 import org.gradle.api.Plugin;
-import org.gradle.api.internal.ClosureBackedAction;
-import org.gradle.api.plugins.PluginAware;
+import org.gradle.api.plugins.PluginCollection;
 import org.gradle.api.plugins.PluginContainer;
 import org.gradle.api.plugins.UnknownPluginException;
+import org.gradle.api.specs.Spec;
+import org.gradle.plugin.internal.PluginId;
 
-public class DefaultPluginContainer<T extends PluginAware> extends DefaultPluginCollection<Plugin> implements PluginContainer {
-    private PluginRegistry pluginRegistry;
-    private final T pluginAware;
+public class DefaultPluginContainer extends DefaultPluginCollection<Plugin> implements PluginContainer {
 
-    public DefaultPluginContainer(PluginRegistry pluginRegistry, T pluginAware) {
+    private final PluginRegistry pluginRegistry;
+    private final PluginManagerInternal pluginManager;
+
+    public DefaultPluginContainer(PluginRegistry pluginRegistry, final PluginManagerInternal pluginManager) {
         super(Plugin.class);
         this.pluginRegistry = pluginRegistry;
-        this.pluginAware = pluginAware;
+        this.pluginManager = pluginManager;
+
+        // Need this to make withId() work when someone does project.plugins.add(new SomePlugin());
+        whenObjectAdded(new Action<Plugin>() {
+            public void execute(Plugin plugin) {
+                pluginManager.addImperativePlugin(plugin.getClass());
+            }
+        });
     }
 
     public Plugin apply(String id) {
-        return addPluginInternal(getTypeForId(id));
+        PluginImplementation plugin = pluginRegistry.lookup(PluginId.unvalidated(id));
+        if (plugin == null) {
+            throw new UnknownPluginException("Plugin with id '" + id + "' not found.");
+        }
+
+        if (!Plugin.class.isAssignableFrom(plugin.asClass())) {
+            throw new IllegalArgumentException("Plugin implementation '" + plugin.asClass().getName() + "' does not implement the Plugin interface. This plugin cannot be applied directly via the PluginContainer.");
+        } else {
+            return pluginManager.addImperativePlugin(plugin);
+        }
     }
 
-    public <T extends Plugin> T apply(Class<T> type) {
-        return addPluginInternal(type);
+    public <P extends Plugin> P apply(Class<P> type) {
+        return pluginManager.addImperativePlugin(type);
     }
 
     public boolean hasPlugin(String id) {
@@ -49,29 +68,33 @@ public class DefaultPluginContainer<T extends PluginAware> extends DefaultPlugin
         return findPlugin(type) != null;
     }
 
-    public Plugin findPlugin(String id) {
-        try {
-            return findPlugin(getTypeForId(id));
-        } catch (UnknownPluginException e) {
-            return null;
+    private Plugin doFindPlugin(String id) {
+        for (final PluginManagerInternal.PluginWithId pluginWithId : pluginManager.pluginsForId(id)) {
+            Plugin plugin = Iterables.tryFind(DefaultPluginContainer.this, new Predicate<Plugin>() {
+                public boolean apply(Plugin plugin) {
+                    return pluginWithId.clazz.equals(plugin.getClass());
+                }
+            }).orNull();
+
+            if (plugin != null) {
+                return plugin;
+            }
         }
+
+        return null;
     }
 
-    public <T extends Plugin> T findPlugin(Class<T> type) {
+    public Plugin findPlugin(String id) {
+        return doFindPlugin(id);
+    }
+
+    public <P extends Plugin> P findPlugin(Class<P> type) {
         for (Plugin plugin : this) {
             if (plugin.getClass().equals(type)) {
                 return type.cast(plugin);
             }
         }
         return null;
-    }
-
-    private <T extends Plugin> T addPluginInternal(Class<T> type) {
-        if (findPlugin(type) == null) {
-            Plugin plugin = providePlugin(type);
-            add(plugin);
-        }
-        return type.cast(findPlugin(type));
     }
 
     public Plugin getPlugin(String id) {
@@ -86,34 +109,40 @@ public class DefaultPluginContainer<T extends PluginAware> extends DefaultPlugin
         return getPlugin(id);
     }
 
-    public <T extends Plugin> T getAt(Class<T> type) throws UnknownPluginException {
+    public <P extends Plugin> P getAt(Class<P> type) throws UnknownPluginException {
         return getPlugin(type);
     }
 
-    public <T extends Plugin> T getPlugin(Class<T> type) throws UnknownPluginException {
-        Plugin plugin = findPlugin(type);
+    public <P extends Plugin> P getPlugin(Class<P> type) throws UnknownPluginException {
+        P plugin = findPlugin(type);
         if (plugin == null) {
             throw new UnknownPluginException("Plugin with type " + type + " has not been used.");
         }
         return type.cast(plugin);
     }
 
-    public void withId(String pluginId, Action<Plugin> action) {
-        Class type = getTypeForId(pluginId);
-        withType(type, action);
+    public void withId(final String pluginId, final Action<? super Plugin> action) {
+        Action<DefaultPluginManager.PluginWithId> wrappedAction = new Action<DefaultPluginManager.PluginWithId>() {
+            public void execute(final DefaultPluginManager.PluginWithId pluginWithId) {
+                matching(new Spec<Plugin>() {
+                    public boolean isSatisfiedBy(Plugin element) {
+                        return pluginWithId.clazz.equals(element.getClass());
+                    }
+                }).all(action);
+            }
+        };
+
+        pluginManager.pluginsForId(pluginId).all(wrappedAction);
     }
 
-    public void withId(String pluginId, Closure closure) {
-        withId(pluginId, new ClosureBackedAction<Plugin>(closure));
+    @Override
+    public <S extends Plugin> PluginCollection<S> withType(Class<S> type) {
+        // runtime check because method is used from Groovy where type bounds are not respected
+        if (!Plugin.class.isAssignableFrom(type)) {
+            throw new IllegalArgumentException(String.format("'%s' does not implement the Plugin interface.", type.getName()));
+        }
+
+        return super.withType(type);
     }
 
-    protected Class<? extends Plugin> getTypeForId(String id) {
-        return pluginRegistry.getTypeForId(id);
-    }
-
-    private Plugin<T> providePlugin(Class<? extends Plugin> type) {
-        Plugin<T> plugin = pluginRegistry.loadPlugin(type);
-        plugin.apply(pluginAware);
-        return plugin;
-    }
 }

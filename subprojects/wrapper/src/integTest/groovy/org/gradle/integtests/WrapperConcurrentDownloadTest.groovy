@@ -17,6 +17,7 @@ package org.gradle.integtests
 
 import org.apache.commons.io.IOUtils
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.test.fixtures.file.TestFile
 import org.junit.Rule
 import org.junit.rules.ExternalResource
@@ -30,6 +31,7 @@ import javax.servlet.ServletException
 import javax.servlet.http.HttpServletRequest
 import javax.servlet.http.HttpServletResponse
 
+@LeaksFileHandles
 class WrapperConcurrentDownloadTest extends AbstractIntegrationSpec {
     @Rule BlockingDownloadHttpServer server = new BlockingDownloadHttpServer(distribution.binDistribution)
 
@@ -37,7 +39,7 @@ class WrapperConcurrentDownloadTest extends AbstractIntegrationSpec {
         executer.beforeExecute(new WrapperSetup())
     }
 
-    @Issue("http://issues.gradle.org/browse/GRADLE-2699")
+    @Issue("https://issues.gradle.org/browse/GRADLE-2699")
     def "concurrent downloads do not stomp over each other"() {
         given:
         buildFile << """

@@ -18,23 +18,35 @@ package org.gradle.api.publish.ivy.plugins;
 
 import org.gradle.api.*;
 import org.gradle.api.artifacts.Module;
+import org.gradle.api.artifacts.dsl.RepositoryHandler;
+import org.gradle.api.artifacts.repositories.IvyArtifactRepository;
 import org.gradle.api.internal.artifacts.configurations.DependencyMetaDataProvider;
+import org.gradle.api.internal.file.FileCollectionFactory;
 import org.gradle.api.internal.file.FileResolver;
-import org.gradle.api.publish.internal.ProjectDependencyPublicationResolver;
-import org.gradle.internal.typeconversion.NotationParser;
+import org.gradle.api.publish.PublicationContainer;
 import org.gradle.api.publish.PublishingExtension;
+import org.gradle.api.publish.internal.ProjectDependencyPublicationResolver;
 import org.gradle.api.publish.ivy.IvyArtifact;
 import org.gradle.api.publish.ivy.IvyPublication;
-import org.gradle.api.publish.ivy.internal.IvyPublicationTasksModelRule;
 import org.gradle.api.publish.ivy.internal.artifact.IvyArtifactNotationParserFactory;
 import org.gradle.api.publish.ivy.internal.publication.DefaultIvyPublication;
 import org.gradle.api.publish.ivy.internal.publication.DefaultIvyPublicationIdentity;
+import org.gradle.api.publish.ivy.internal.publication.IvyPublicationInternal;
 import org.gradle.api.publish.ivy.internal.publisher.IvyPublicationIdentity;
+import org.gradle.api.publish.ivy.tasks.GenerateIvyDescriptor;
+import org.gradle.api.publish.ivy.tasks.PublishToIvyRepository;
 import org.gradle.api.publish.plugins.PublishingPlugin;
 import org.gradle.internal.reflect.Instantiator;
-import org.gradle.model.ModelRules;
+import org.gradle.internal.typeconversion.NotationParser;
+import org.gradle.model.ModelMap;
+import org.gradle.model.Mutate;
+import org.gradle.model.Path;
+import org.gradle.model.RuleSource;
 
 import javax.inject.Inject;
+import java.io.File;
+
+import static org.apache.commons.lang.StringUtils.capitalize;
 
 /**
  * Adds the ability to publish in the Ivy format to Ivy repositories.
@@ -47,21 +59,21 @@ public class IvyPublishPlugin implements Plugin<Project> {
     private final Instantiator instantiator;
     private final DependencyMetaDataProvider dependencyMetaDataProvider;
     private final FileResolver fileResolver;
-    private final ModelRules modelRules;
     private final ProjectDependencyPublicationResolver projectDependencyResolver;
+    private final FileCollectionFactory fileCollectionFactory;
 
     @Inject
-    public IvyPublishPlugin(Instantiator instantiator, DependencyMetaDataProvider dependencyMetaDataProvider, FileResolver fileResolver, ModelRules modelRules,
-                            ProjectDependencyPublicationResolver projectDependencyResolver) {
+    public IvyPublishPlugin(Instantiator instantiator, DependencyMetaDataProvider dependencyMetaDataProvider, FileResolver fileResolver,
+                            ProjectDependencyPublicationResolver projectDependencyResolver, FileCollectionFactory fileCollectionFactory) {
         this.instantiator = instantiator;
         this.dependencyMetaDataProvider = dependencyMetaDataProvider;
         this.fileResolver = fileResolver;
-        this.modelRules = modelRules;
         this.projectDependencyResolver = projectDependencyResolver;
+        this.fileCollectionFactory = fileCollectionFactory;
     }
 
     public void apply(final Project project) {
-        project.getPlugins().apply(PublishingPlugin.class);
+        project.getPluginManager().apply(PublishingPlugin.class);
 
         // Can't move this to rules yet, because it has to happen before user deferred configurable actions
         project.getExtensions().configure(PublishingExtension.class, new Action<PublishingExtension>() {
@@ -70,8 +82,46 @@ public class IvyPublishPlugin implements Plugin<Project> {
                 extension.getPublications().registerFactory(IvyPublication.class, new IvyPublicationFactory(dependencyMetaDataProvider, instantiator, fileResolver));
             }
         });
+    }
 
-        modelRules.rule(new IvyPublicationTasksModelRule(project));
+    static class Rules extends RuleSource {
+        @Mutate
+        @SuppressWarnings("UnusedDeclaration")
+        public void createTasks(ModelMap<Task> tasks, PublishingExtension publishingExtension, @Path("buildDir") final File buildDir) {
+            PublicationContainer publications = publishingExtension.getPublications();
+            RepositoryHandler repositories = publishingExtension.getRepositories();
+
+            for (final IvyPublicationInternal publication : publications.withType(IvyPublicationInternal.class)) {
+
+                final String publicationName = publication.getName();
+                final String descriptorTaskName = String.format("generateDescriptorFileFor%sPublication", capitalize(publicationName));
+
+                tasks.create(descriptorTaskName, GenerateIvyDescriptor.class, new Action<GenerateIvyDescriptor>() {
+                    public void execute(final GenerateIvyDescriptor descriptorTask) {
+                        descriptorTask.setDescription(String.format("Generates the Ivy Module Descriptor XML file for publication '%s'.", publication.getName()));
+                        descriptorTask.setGroup(PublishingPlugin.PUBLISH_TASK_GROUP);
+                        descriptorTask.setDescriptor(publication.getDescriptor());
+                        descriptorTask.setDestination(new File(buildDir, "publications/" + publication.getName() + "/ivy.xml"));
+                    }
+                });
+                publication.setDescriptorFile(tasks.get(descriptorTaskName).getOutputs().getFiles());
+
+                for (final IvyArtifactRepository repository : repositories.withType(IvyArtifactRepository.class)) {
+                    final String repositoryName = repository.getName();
+                    final String publishTaskName = String.format("publish%sPublicationTo%sRepository", capitalize(publicationName), capitalize(repositoryName));
+
+                    tasks.create(publishTaskName, PublishToIvyRepository.class, new Action<PublishToIvyRepository>() {
+                        public void execute(PublishToIvyRepository publishTask) {
+                            publishTask.setPublication(publication);
+                            publishTask.setRepository(repository);
+                            publishTask.setGroup(PublishingPlugin.PUBLISH_TASK_GROUP);
+                            publishTask.setDescription(String.format("Publishes Ivy publication '%s' to Ivy repository '%s'.", publicationName, repositoryName));
+                        }
+                    });
+                    tasks.get(PublishingPlugin.PUBLISH_LIFECYCLE_TASK_NAME).dependsOn(publishTaskName);
+                }
+            }
+        }
     }
 
     private class IvyPublicationFactory implements NamedDomainObjectFactory<IvyPublication> {
@@ -91,7 +141,7 @@ public class IvyPublishPlugin implements Plugin<Project> {
             NotationParser<Object, IvyArtifact> notationParser = new IvyArtifactNotationParserFactory(instantiator, fileResolver, publicationIdentity).create();
             return instantiator.newInstance(
                     DefaultIvyPublication.class,
-                    name, instantiator, publicationIdentity, notationParser, projectDependencyResolver
+                    name, instantiator, publicationIdentity, notationParser, projectDependencyResolver, fileCollectionFactory
             );
         }
     }

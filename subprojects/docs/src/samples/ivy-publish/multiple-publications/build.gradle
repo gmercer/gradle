@@ -17,7 +17,7 @@ subprojects {
 
 project(":project1") {
     dependencies {
-       compile 'junit:junit:4.11'
+       compile 'junit:junit:4.12'
     }
 
 
@@ -29,6 +29,8 @@ project(":project1") {
                 module 'project1-sample'
                 revision '1.1'
                 descriptor.status = 'milestone'
+                descriptor.branch = 'testing'
+                descriptor.extraInfo 'http://my.namespace', 'myElement', 'Some value'
 
                 from components.java
             }
@@ -47,7 +49,7 @@ project(":project2") {
     // END SNIPPET multiple-publications
 
     dependencies {
-       compile 'commons-collections:commons-collections:3.1', project(':project1')
+       compile 'commons-collections:commons-collections:3.2.2', project(':project1')
     }
 
     // START SNIPPET multiple-publications

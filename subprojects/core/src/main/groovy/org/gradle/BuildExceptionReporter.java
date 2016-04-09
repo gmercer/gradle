@@ -15,33 +15,33 @@
  */
 package org.gradle;
 
-import org.codehaus.groovy.runtime.StackTraceUtils;
 import org.gradle.api.Action;
-import org.gradle.internal.exceptions.LocationAwareException;
 import org.gradle.api.logging.LogLevel;
 import org.gradle.execution.MultipleBuildFailures;
 import org.gradle.initialization.BuildClientMetaData;
 import org.gradle.internal.exceptions.FailureResolutionAware;
-import org.gradle.logging.LoggingConfiguration;
-import org.gradle.logging.ShowStacktrace;
-import org.gradle.logging.StyledTextOutput;
-import org.gradle.logging.StyledTextOutputFactory;
-import org.gradle.logging.internal.BufferingStyledTextOutput;
-import org.gradle.logging.internal.LinePrefixingStyledTextOutput;
-import org.gradle.logging.internal.LoggingCommandLineConverter;
+import org.gradle.internal.exceptions.LocationAwareException;
+import org.gradle.internal.logging.LoggingConfiguration;
+import org.gradle.internal.logging.ShowStacktrace;
+import org.gradle.internal.logging.StyledTextOutput;
+import org.gradle.internal.logging.StyledTextOutputFactory;
+import org.gradle.internal.logging.internal.BufferingStyledTextOutput;
+import org.gradle.internal.logging.internal.LinePrefixingStyledTextOutput;
+import org.gradle.internal.logging.internal.LoggingCommandLineConverter;
 import org.gradle.util.GUtil;
 import org.gradle.util.TreeVisitor;
 
 import java.util.List;
 
-import static org.gradle.logging.StyledTextOutput.Style.*;
+import static org.gradle.internal.logging.StyledTextOutput.Style.*;
 
 /**
  * A {@link BuildListener} which reports the build exception, if any.
  */
+@Deprecated
 public class BuildExceptionReporter extends BuildAdapter implements Action<Throwable> {
     private enum ExceptionStyle {
-        NONE, SANITIZED, FULL
+        NONE, FULL
     }
 
     private final StyledTextOutputFactory textOutputFactory;
@@ -115,10 +115,7 @@ public class BuildExceptionReporter extends BuildAdapter implements Action<Throw
     }
 
     private void reportBuildFailure(String granularity, Throwable failure, FailureDetails details) {
-        if (loggingConfiguration.getShowStacktrace() == ShowStacktrace.ALWAYS || loggingConfiguration.getLogLevel() == LogLevel.DEBUG) {
-            details.exceptionStyle = ExceptionStyle.SANITIZED;
-        }
-        if (loggingConfiguration.getShowStacktrace() == ShowStacktrace.ALWAYS_FULL) {
+        if (loggingConfiguration.getShowStacktrace() != ShowStacktrace.INTERNAL_EXCEPTIONS) {
             details.exceptionStyle = ExceptionStyle.FULL;
         }
 
@@ -144,16 +141,7 @@ public class BuildExceptionReporter extends BuildAdapter implements Action<Throw
                     if (node == scriptException) {
                         details.details.text(getMessage(scriptException.getCause()));
                     } else {
-                        details.details.format("%n");
-                        StringBuilder prefix = new StringBuilder();
-                        for (int i = 1; i < depth; i++) {
-                            prefix.append("   ");
-                        }
-                        details.details.text(prefix);
-                        prefix.append("  ");
-                        details.details.style(Info).text("> ").style(Normal);
-
-                        final LinePrefixingStyledTextOutput output = new LinePrefixingStyledTextOutput(details.details, prefix);
+                        final LinePrefixingStyledTextOutput output = getLinePrefixingStyledTextOutput();
                         output.text(getMessage(node));
                     }
                 }
@@ -166,6 +154,19 @@ public class BuildExceptionReporter extends BuildAdapter implements Action<Throw
                 @Override
                 public void endChildren() {
                     depth--;
+                }
+
+                private LinePrefixingStyledTextOutput getLinePrefixingStyledTextOutput() {
+                    details.details.format("%n");
+                    StringBuilder prefix = new StringBuilder();
+                    for (int i = 1; i < depth; i++) {
+                        prefix.append("   ");
+                    }
+                    details.details.text(prefix);
+                    prefix.append("  ");
+                    details.details.style(Info).text("> ").style(Normal);
+
+                    return new LinePrefixingStyledTextOutput(details.details, prefix, false);
                 }
             });
         } else {
@@ -229,9 +230,6 @@ public class BuildExceptionReporter extends BuildAdapter implements Action<Throw
         Throwable exception = null;
         switch (details.exceptionStyle) {
             case NONE:
-                break;
-            case SANITIZED:
-                exception = StackTraceUtils.deepSanitize(details.failure);
                 break;
             case FULL:
                 exception = details.failure;

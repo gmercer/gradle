@@ -17,54 +17,43 @@
 package org.gradle.initialization;
 
 import org.gradle.api.internal.ClassPathRegistry;
-import org.gradle.internal.classloader.*;
+import org.gradle.internal.classloader.CachingClassLoader;
+import org.gradle.internal.classloader.ClassLoaderFactory;
+import org.gradle.internal.classloader.FilteringClassLoader;
+import org.gradle.internal.classloader.MutableURLClassLoader;
 import org.gradle.internal.classpath.ClassPath;
-import org.gradle.internal.classpath.DefaultClassPath;
-import org.gradle.internal.jvm.Jvm;
 
-import java.io.File;
-import java.net.URLClassLoader;
-
-public class DefaultClassLoaderRegistry implements ClassLoaderRegistry, JdkToolsInitializer {
-    private final ClassLoader rootClassLoader;
-    private final ClassLoader coreImplClassLoader;
-    private final ClassLoader pluginsClassLoader;
+public class DefaultClassLoaderRegistry implements ClassLoaderRegistry {
+    private final ClassLoader apiOnlyClassLoader;
+    private final ClassLoader apiAndPluginsClassLoader;
+    private final ClassLoader extensionsClassLoader;
+    private final ClassLoaderFactory classLoaderFactory;
 
     public DefaultClassLoaderRegistry(ClassPathRegistry classPathRegistry, ClassLoaderFactory classLoaderFactory) {
+        this.classLoaderFactory = classLoaderFactory;
         ClassLoader runtimeClassLoader = getClass().getClassLoader();
 
-        // Core impl
-        ClassPath coreImplClassPath = classPathRegistry.getClassPath("GRADLE_CORE_IMPL");
-        coreImplClassLoader = new MutableURLClassLoader(runtimeClassLoader, coreImplClassPath);
+        apiOnlyClassLoader = restrictToGradleApi(runtimeClassLoader);
 
-        // Add in libs for plugins
-        ClassPath pluginsClassPath = classPathRegistry.getClassPath("GRADLE_PLUGINS");
-        ClassLoader pluginsImports = new CachingClassLoader(new MultiParentClassLoader(runtimeClassLoader, coreImplClassLoader));
-        pluginsClassLoader = new MutableURLClassLoader(pluginsImports, pluginsClassPath);
+        ClassPath pluginsClassPath = classPathRegistry.getClassPath("GRADLE_EXTENSIONS");
+        extensionsClassLoader = new MutableURLClassLoader(runtimeClassLoader, pluginsClassPath);
 
-        FilteringClassLoader rootClassLoader = classLoaderFactory.createFilteringClassLoader(pluginsClassLoader);
+        this.apiAndPluginsClassLoader = restrictToGradleApi(extensionsClassLoader);
+    }
+
+    private ClassLoader restrictToGradleApi(ClassLoader classLoader) {
+        FilteringClassLoader rootClassLoader = classLoaderFactory.createFilteringClassLoader(classLoader);
         rootClassLoader.allowPackage("org.gradle");
         rootClassLoader.allowResources("META-INF/gradle-plugins");
         rootClassLoader.allowPackage("org.apache.tools.ant");
         rootClassLoader.allowPackage("groovy");
         rootClassLoader.allowPackage("org.codehaus.groovy");
         rootClassLoader.allowPackage("groovyjarjarantlr");
-        rootClassLoader.allowPackage("org.apache.ivy");
         rootClassLoader.allowPackage("org.slf4j");
         rootClassLoader.allowPackage("org.apache.commons.logging");
         rootClassLoader.allowPackage("org.apache.log4j");
         rootClassLoader.allowPackage("javax.inject");
-
-        this.rootClassLoader = new CachingClassLoader(rootClassLoader);
-    }
-
-    public void initializeJdkTools() {
-        // Add in tools.jar to the systemClassloader parent
-        File toolsJar = Jvm.current().getToolsJar();
-        if (toolsJar != null) {
-            final ClassLoader systemClassLoaderParent = ClassLoader.getSystemClassLoader().getParent();
-            ClasspathUtil.addUrl((URLClassLoader) systemClassLoaderParent, new DefaultClassPath(toolsJar).getAsURLs());
-        }
+        return new CachingClassLoader(rootClassLoader);
     }
 
     public ClassLoader getRuntimeClassLoader() {
@@ -72,14 +61,14 @@ public class DefaultClassLoaderRegistry implements ClassLoaderRegistry, JdkTools
     }
 
     public ClassLoader getGradleApiClassLoader() {
-        return rootClassLoader;
-    }
-
-    public ClassLoader getCoreImplClassLoader() {
-        return coreImplClassLoader;
+        return apiAndPluginsClassLoader;
     }
 
     public ClassLoader getPluginsClassLoader() {
-        return pluginsClassLoader;
+        return extensionsClassLoader;
+    }
+
+    public ClassLoader getGradleCoreApiClassLoader() {
+        return apiOnlyClassLoader;
     }
 }

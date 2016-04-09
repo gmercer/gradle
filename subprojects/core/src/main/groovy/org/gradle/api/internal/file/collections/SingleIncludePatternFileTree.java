@@ -21,13 +21,14 @@ import org.gradle.api.file.FileVisitDetails;
 import org.gradle.api.file.FileVisitor;
 import org.gradle.api.file.RelativePath;
 import org.gradle.api.internal.file.DefaultFileVisitDetails;
+import org.gradle.api.internal.file.FileSystemSubset;
 import org.gradle.api.internal.file.pattern.PatternStep;
 import org.gradle.api.internal.file.pattern.PatternStepFactory;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.specs.Specs;
 import org.gradle.api.tasks.util.PatternSet;
-import org.gradle.internal.nativeplatform.filesystem.FileSystem;
-import org.gradle.internal.nativeplatform.services.FileSystems;
+import org.gradle.internal.nativeintegration.filesystem.FileSystem;
+import org.gradle.internal.nativeintegration.services.FileSystems;
 
 import java.io.File;
 import java.util.Arrays;
@@ -90,9 +91,12 @@ public class SingleIncludePatternFileTree implements MinimalFileTree {
                 throw new GradleException(String.format("Could not list contents of '%s'.", file));
             }
             for (File child : children) {
-                if (stopFlag.get()) { break; }
-                if (step.matches(child.getName())) {
-                    relativePath.addLast(child.getName());
+                if (stopFlag.get()) {
+                    break;
+                }
+                String childName = child.getName();
+                if (step.matches(childName)) {
+                    relativePath.addLast(childName);
                     doVisitDirOrFile(visitor, child, relativePath, segmentIndex + 1, stopFlag);
                     relativePath.removeLast();
                 }
@@ -127,5 +131,15 @@ public class SingleIncludePatternFileTree implements MinimalFileTree {
 
     public String getDisplayName() {
         return "directory '" + baseDir + "' include '" + includePattern + "'";
+    }
+
+    @Override
+    public void registerWatchPoints(FileSystemSubset.Builder builder) {
+        builder.add(baseDir, new PatternSet().include(includePattern).exclude(excludeSpec));
+    }
+
+    @Override
+    public void visitTreeOrBackingFile(FileVisitor visitor) {
+        visit(visitor);
     }
 }

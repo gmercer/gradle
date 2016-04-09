@@ -17,14 +17,13 @@
 package org.gradle.integtests
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.util.TextUtil
-import org.junit.Test
+import spock.lang.Ignore
 import spock.lang.Issue
 
 import static org.hamcrest.Matchers.startsWith
 
 public class TaskExecutionIntegrationTest extends AbstractIntegrationSpec {
-    
+
     def taskCanAccessTaskGraph() {
         buildFile << """
     boolean notified = false
@@ -51,7 +50,7 @@ public class TaskExecutionIntegrationTest extends AbstractIntegrationSpec {
 """
         when:
         succeeds "a"
-        
+
         then:
         result.assertTasksExecuted(":b", ":a");
     }
@@ -84,13 +83,12 @@ public class TaskExecutionIntegrationTest extends AbstractIntegrationSpec {
         task c(dependsOn: ['b', ':a'])
     };
 """
-        
+
         expect:
         run("a", "c").assertTasksExecuted(":a", ":b", ":c", ":child1:b", ":child1:c", ":child1-2:b", ":child1-2:c", ":child1-2-2:b", ":child1-2-2:c", ":child2:b", ":child2:c");
         run("b", ":child2:c").assertTasksExecuted(":b", ":child1:b", ":child1-2:b", ":child1-2-2:b", ":child2:b", ":a", ":child2:c");
     }
 
-    @Test
     def executesMultiProjectDefaultTasksInASingleBuildAndEachTaskAtMostOnce() {
         settingsFile << "include 'child1', 'child2'"
         buildFile << """
@@ -106,16 +104,6 @@ public class TaskExecutionIntegrationTest extends AbstractIntegrationSpec {
         run().assertTasksExecuted(":a", ":child1:a", ":child2:a", ":child1:b", ":child2:b");
     }
 
-    def executesProjectDefaultTasksWhenNoneSpecified() {
-        buildFile << """
-    task a
-    task b(dependsOn: a)
-    defaultTasks 'b'
-"""
-        expect:
-        run().assertTasksExecuted(":a", ":b");
-    }
-    
     def doesNotExecuteTaskActionsWhenDryRunSpecified() {
         buildFile << """
     task a << { fail() }
@@ -185,8 +173,47 @@ public class TaskExecutionIntegrationTest extends AbstractIntegrationSpec {
         executer.withTasks("d").withArguments("-x", "unknown").runWithFailure().assertThatDescription(startsWith("Task 'unknown' not found in root project"));
     }
 
-    @Issue("http://issues.gradle.org/browse/GRADLE-2974")
-    @Issue("http://issues.gradle.org/browse/GRADLE-3031")
+    def "unqualified exclude task name does not exclude tasks from parent projects"() {
+        settingsFile << "include 'sub'"
+        buildFile << """
+    task a
+"""
+        file("sub/build.gradle") << """
+    task a
+    task b
+    task c(dependsOn: [a, b, ':a'])
+"""
+
+        expect:
+        executer.inDirectory(file('sub')).withTasks('c').withArguments('-x', 'a').run().assertTasksExecuted(':a', ':sub:b', ':sub:c')
+    }
+
+    def 'can use camel-case matching to exclude tasks'() {
+        buildFile << """
+task someDep
+task someOtherDep
+task someTask(dependsOn: [someDep, someOtherDep])
+"""
+
+        expect:
+        executer.withTasks("someTask").withArguments("-x", "sODep").run().assertTasksExecuted(":someDep", ":someTask")
+        executer.withTasks("someTask").withArguments("-x", ":sODep").run().assertTasksExecuted(":someDep", ":someTask")
+    }
+
+    def 'can combine exclude task filters'() {
+        buildFile << """
+task someDep
+task someOtherDep
+task someTask(dependsOn: [someDep, someOtherDep])
+"""
+
+        expect:
+        executer.withTasks("someTask").withArguments("-x", "someDep", "-x", "someOtherDep").run().assertTasksExecuted(":someTask")
+        executer.withTasks("someTask").withArguments("-x", ":someDep", "-x", ":someOtherDep").run().assertTasksExecuted(":someTask")
+        executer.withTasks("someTask").withArguments("-x", "sODep", "-x", "soDep").run().assertTasksExecuted(":someTask")
+    }
+
+    @Issue(["https://issues.gradle.org/browse/GRADLE-3031", "https://issues.gradle.org/browse/GRADLE-2974"])
     def 'excluding a task that is a dependency of multiple tasks'() {
         settingsFile << "include 'sub'"
         buildFile << """
@@ -204,7 +231,7 @@ public class TaskExecutionIntegrationTest extends AbstractIntegrationSpec {
         executer.withTasks("b", "a").withArguments("-x", ":a").run().assertTasksExecuted(":b", ":sub:a");
     }
 
-    @Issue("http://issues.gradle.org/browse/GRADLE-2022")
+    @Issue("https://issues.gradle.org/browse/GRADLE-2022")
     def tryingToInstantiateTaskDirectlyFailsWithGoodErrorMessage() {
         buildFile << """
     new DefaultTask()
@@ -225,32 +252,37 @@ public class TaskExecutionIntegrationTest extends AbstractIntegrationSpec {
         fails 'b'
 
         then:
-        failure.assertHasDescription TextUtil.toPlatformLineSeparators("""Circular dependency between the following tasks:
+        failure.assertHasDescription """Circular dependency between the following tasks:
 :a
 \\--- :b
      \\--- :a (*)
 
-(*) - details omitted (listed previously)""")
+(*) - details omitted (listed previously)"""
     }
 
-    def "placeolder actions not triggered when not requested"() {
+    @Ignore("Re-enable when work on realising only the required tasks instead of the whole task container is finished")
+    def "placeholder actions not triggered when not requested"() {
         when:
         buildFile << """
-        task a
-        tasks.addPlaceholderAction("b") {
+        task thing
+        tasks.addPlaceholderAction("b", DefaultTask) {
             throw new RuntimeException()
         }
+        task otherThing { dependsOn tasks.thing }
 """
         then:
-        succeeds 'a'
+        succeeds 'thing'
+        succeeds 'th'
+        succeeds 'otherThing'
+        succeeds 'oTh'
     }
 
-    def "explicit tasks are preferred over placeholder actions"() {
+    def "explicit tasks are preferred over placeholder tasks"() {
         buildFile << """
         task someTask << {println "explicit sometask"}
-        tasks.addPlaceholderAction("someTask"){
+        tasks.addPlaceholderAction("someTask", DefaultTask) {
             println  "placeholder action triggered"
-            task someTask << {println "placeholder sometask"}
+            it.doLast { throw new RuntimeException() }
         }
 """
         when:
@@ -258,16 +290,13 @@ public class TaskExecutionIntegrationTest extends AbstractIntegrationSpec {
 
         then:
         output.contains("explicit sometask")
-        !output.contains("placeholder action triggered")
 
         when:
         succeeds 'someT'
 
         then:
         output.contains("explicit sometask")
-        !output.contains("placeholder action triggered")
     }
-
 
     def "honours mustRunAfter task ordering"() {
         buildFile << """
@@ -348,12 +377,12 @@ public class TaskExecutionIntegrationTest extends AbstractIntegrationSpec {
         fails 'b'
 
         then:
-        failure.assertHasDescription TextUtil.toPlatformLineSeparators("""Circular dependency between the following tasks:
+        failure.assertHasDescription """Circular dependency between the following tasks:
 :a
 \\--- :b
      \\--- :a (*)
 
-(*) - details omitted (listed previously)""")
+(*) - details omitted (listed previously)"""
     }
 
     def "checked exceptions thrown by tasks are reported correctly"() {
@@ -380,14 +409,17 @@ public class TaskExecutionIntegrationTest extends AbstractIntegrationSpec {
 
     def "honours shouldRunAfter task ordering"() {
         buildFile << """
-    task a {
+
+    class NotParallel extends DefaultTask {}
+
+    task a(type: NotParallel) {
         dependsOn 'b'
     }
-    task b {
+    task b(type: NotParallel) {
         shouldRunAfter 'c'
     }
-    task c
-    task d {
+    task c(type: NotParallel)
+    task d(type: NotParallel) {
         dependsOn 'c'
     }
 """
@@ -400,28 +432,30 @@ public class TaskExecutionIntegrationTest extends AbstractIntegrationSpec {
 
     def "multiple should run after ordering can be ignored for one execution plan"() {
         buildFile << """
-    task a {
+    class NotParallel extends DefaultTask {}
+
+    task a(type: NotParallel) {
         dependsOn 'b', 'h'
     }
-    task b {
+    task b(type: NotParallel) {
         dependsOn 'c'
     }
-    task c {
+    task c(type: NotParallel) {
         dependsOn 'g'
         shouldRunAfter 'd'
     }
-    task d {
+    task d(type: NotParallel) {
         finalizedBy 'e'
         dependsOn 'f'
     }
-    task e
-    task f {
+    task e(type: NotParallel)
+    task f(type: NotParallel) {
         dependsOn 'c'
     }
-    task g {
+    task g(type: NotParallel) {
         shouldRunAfter 'h'
     }
-    task h {
+    task h(type: NotParallel) {
         dependsOn 'b'
     }
 """

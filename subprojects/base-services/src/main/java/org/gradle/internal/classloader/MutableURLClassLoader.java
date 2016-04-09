@@ -30,7 +30,7 @@ public class MutableURLClassLoader extends URLClassLoader implements ClassLoader
     }
 
     public MutableURLClassLoader(ClassLoader parent, Collection<URL> urls) {
-        super(urls.toArray(new URL[urls.size()]), parent);
+        super(urls.toArray(new URL[0]), parent);
     }
 
     public MutableURLClassLoader(ClassLoader parent, ClassPath classPath) {
@@ -67,6 +67,11 @@ public class MutableURLClassLoader extends URLClassLoader implements ClassLoader
 
         public List<URL> getClasspath() {
             return classpath;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("[%s classpath:%s]", getClass().getSimpleName(), classpath);
         }
 
         @Override

@@ -19,8 +19,8 @@ import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.internal.plugins.DslObject;
-import org.gradle.api.tasks.diagnostics.DependencyReportTask;
 import org.gradle.api.reporting.dependencies.HtmlDependencyReportTask;
+import org.gradle.api.tasks.diagnostics.DependencyReportTask;
 import org.gradle.api.tasks.diagnostics.PropertyReportTask;
 import org.gradle.api.tasks.diagnostics.TaskReportTask;
 
@@ -37,8 +37,9 @@ public class ProjectReportsPlugin implements Plugin<Project> {
     public static final String HTML_DEPENDENCY_REPORT = "htmlDependencyReport";
     public static final String PROJECT_REPORT = "projectReport";
 
+    @Override
     public void apply(Project project) {
-        project.getPlugins().apply(ReportingBasePlugin.class);
+        project.getPluginManager().apply(ReportingBasePlugin.class);
         final ProjectReportsPluginConvention convention = new ProjectReportsPluginConvention(project);
         project.getConvention().getPlugins().put("projectReports", convention);
 
@@ -86,10 +87,10 @@ public class ProjectReportsPlugin implements Plugin<Project> {
                 HtmlDependencyReportTask.class);
         htmlDependencyReportTask.setDescription("Generates an HTML report about your library dependencies.");
         new DslObject(htmlDependencyReportTask.getReports().getHtml()).getConventionMapping().map("destination", new Callable<Object>() {
-                    public Object call() throws Exception {
-                        return new File(convention.getProjectReportDir(), "dependencies");
-                    }
-                });
+            public Object call() throws Exception {
+                return new File(convention.getProjectReportDir(), "dependencies");
+            }
+        });
         htmlDependencyReportTask.conventionMapping("projects", new Callable<Object>() {
             public Object call() throws Exception {
                 return convention.getProjects();

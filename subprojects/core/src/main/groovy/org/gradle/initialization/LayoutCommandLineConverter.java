@@ -32,7 +32,7 @@ public class LayoutCommandLineConverter extends AbstractCommandLineConverter<Bui
     private static final String PROJECT_DIR = "p";
 
     public BuildLayoutParameters convert(ParsedCommandLine options, BuildLayoutParameters target) throws CommandLineArgumentException {
-        Transformer<File, String> resolver = new BasicFileResolver(target.getProjectDir());
+        Transformer<File, String> resolver = new BasicFileResolver(target.getCurrentDir());
         if (options.hasOption(NO_SEARCH_UPWARDS)) {
             target.setSearchUpwards(false);
         }

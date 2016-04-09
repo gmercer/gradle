@@ -19,7 +19,7 @@ package org.gradle.api.internal.project
 import org.gradle.api.initialization.ProjectDescriptor
 import org.gradle.api.internal.GradleInternal
 import org.gradle.api.internal.initialization.ClassLoaderScope
-import org.gradle.groovy.scripts.StringScriptSource
+import org.gradle.groovy.scripts.NonExistentFileScriptSource
 import org.gradle.groovy.scripts.UriScriptSource
 import org.gradle.internal.reflect.Instantiator
 import org.gradle.internal.service.scopes.ServiceRegistryFactory
@@ -28,7 +28,8 @@ import org.junit.Rule
 import spock.lang.Specification
 
 class ProjectFactoryTest extends Specification {
-    @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    @Rule
+    TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
     def instantiator = Mock(Instantiator)
     def projectDescriptor = Stub(ProjectDescriptor)
     def gradle = Stub(GradleInternal)
@@ -36,7 +37,8 @@ class ProjectFactoryTest extends Specification {
     def projectRegistry = Mock(ProjectRegistry)
     def project = Stub(DefaultProject)
     def factory = new ProjectFactory(instantiator, projectRegistry)
-    def classLoaderScope = Mock(ClassLoaderScope)
+    def rootProjectScope = Mock(ClassLoaderScope)
+    def baseScope = Mock(ClassLoaderScope)
 
     def setup() {
         gradle.serviceRegistryFactory >> serviceRegistryFactory
@@ -52,11 +54,11 @@ class ProjectFactoryTest extends Specification {
         projectDescriptor.buildFile >> buildFile
 
         when:
-        def result = factory.createProject(projectDescriptor, null, gradle, classLoaderScope)
+        def result = factory.createProject(projectDescriptor, null, gradle, rootProjectScope, baseScope)
 
         then:
         result == project
-        1 * instantiator.newInstance(DefaultProject, "name", null, projectDir, { it instanceof UriScriptSource }, gradle, serviceRegistryFactory, classLoaderScope) >> project
+        1 * instantiator.newInstance(DefaultProject, "name", null, projectDir, { it instanceof UriScriptSource }, gradle, serviceRegistryFactory, rootProjectScope, baseScope) >> project
         1 * projectRegistry.addProject(project)
     }
 
@@ -70,11 +72,11 @@ class ProjectFactoryTest extends Specification {
         projectDescriptor.buildFile >> buildFile
 
         when:
-        def result = factory.createProject(projectDescriptor, null, gradle, classLoaderScope)
+        def result = factory.createProject(projectDescriptor, null, gradle, rootProjectScope, baseScope)
 
         then:
         result == project
-        1 * instantiator.newInstance(DefaultProject, "name", null, projectDir, { it instanceof StringScriptSource }, gradle, serviceRegistryFactory, classLoaderScope) >> project
+        1 * instantiator.newInstance(DefaultProject, "name", null, projectDir, { it instanceof NonExistentFileScriptSource }, gradle, serviceRegistryFactory, rootProjectScope, baseScope) >> project
         1 * projectRegistry.addProject(project)
     }
 
@@ -89,11 +91,11 @@ class ProjectFactoryTest extends Specification {
         projectDescriptor.buildFile >> buildFile
 
         when:
-        def result = factory.createProject(projectDescriptor, parent, gradle, classLoaderScope)
+        def result = factory.createProject(projectDescriptor, parent, gradle, rootProjectScope, baseScope)
 
         then:
         result == project
-        1 * instantiator.newInstance(DefaultProject, "name", parent, projectDir, _, gradle, serviceRegistryFactory, classLoaderScope) >> project
+        1 * instantiator.newInstance(DefaultProject, "name", parent, projectDir, _, gradle, serviceRegistryFactory, rootProjectScope, baseScope) >> project
         1 * parent.addChildProject(project)
         1 * projectRegistry.addProject(project)
     }

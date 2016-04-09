@@ -17,14 +17,14 @@
 package org.gradle.plugins.ide.idea.model
 
 import org.gradle.api.Incubating
+import org.gradle.api.JavaVersion
 import org.gradle.plugins.ide.api.XmlFileContentMerger
 import org.gradle.util.ConfigureUtil
-
 /**
  * Enables fine-tuning project details (*.ipr file) of the IDEA plugin.
  * <p>
  * Example of use with a blend of all possible properties.
- * Typically you don't have configure IDEA module directly because Gradle configures it for you.
+ * Typically you don't have to configure IDEA module directly because Gradle configures it for you.
  *
  * <pre autoTested=''>
  * import org.gradle.plugins.ide.idea.model.*
@@ -41,14 +41,17 @@ import org.gradle.util.ConfigureUtil
  *     //you can update the source wildcards
  *     wildcards += '!?*.ruby'
  *
- *     //you can change the modules of the the *.ipr
+ *     //you can configure the VCS used by the project
+ *     vcs = 'Git'
+ *
+ *     //you can change the modules of the *.ipr
  *     //modules = project(':someProject').idea.module
  *
  *     //you can change the output file
  *     outputFile = new File(outputFile.parentFile, 'someBetterName.ipr')
  *
  *     //you can add project-level libraries
- *     projectLibraries &lt;&lt; new ProjectLibrary(name: "my-library", classes: [new Path("path/to/library")])
+ *     projectLibraries &lt;&lt; new ProjectLibrary(name: "my-library", classes: [new File("path/to/library")])
  *   }
  * }
  * </pre>
@@ -107,16 +110,50 @@ class IdeaProject {
     String jdkName
 
     /**
-     * The java language level of the project.
-     * Pass a valid Java version number (e.g. '1.5') or IDEA language level (e.g. 'JDK_1_5').
+     * The default Java language Level to use for this project.
      * <p>
-     * See the examples in the docs for {@link IdeaProject}.
+     * Generally, it isn't recommended to change this value. Instead, you are encouraged to set {@code sourceCompatibility} and {@code targetCompatibility}
+     * for your Gradle projects which allows you to have full control over language levels in Gradle projects, and means that Gradle and IDEA will use the same
+     * settings when compiling.
+     * <p>
+     * When not explicitly set, this is calculated as the maximum language level for the Idea modules of this Idea project.
      */
     IdeaLanguageLevel languageLevel
 
+    /**
+     * The target bytecode version to use for this project.
+     * <p>
+     * Generally, it isn't recommended to change this value. Instead, you are encouraged to set {@code sourceCompatibility} and {@code targetCompatibility}
+     * for your Gradle projects which allows you to have full control over language levels in Gradle projects, and means that Gradle and IDEA will use the same
+     * settings when compiling.
+     * <p>
+     * When {@code languageLevel} is not explicitly set, this is calculated as the maximum target bytecode version for the Idea modules of this Idea project.
+     */
+    @Incubating
+    JavaVersion targetBytecodeVersion
+
+    /**
+     * Sets the java language level for the project.
+     * Pass a valid Java version number (e.g. '1.5') or IDEA language level (e.g. 'JDK_1_5').
+     * <p>
+     * See the examples in the docs for {@link IdeaProject}.
+     * <p>
+     * When explicitly set in the build script, this setting overrides any calculated values for Idea project
+     * and Idea module.
+     */
     void setLanguageLevel(Object languageLevel) {
         this.languageLevel = new IdeaLanguageLevel(languageLevel)
     }
+
+    /**
+     * The vcs for the project.
+     * <p>
+     * Values are the same as used in IDEA's “Version Control” preference window (e.g. 'Git', 'Subversion').
+     * <p>
+     * See the examples in the docs for {@link IdeaProject}.
+     */
+    @Incubating
+    String vcs
 
     /**
      * The wildcard resource patterns.
@@ -163,16 +200,21 @@ class IdeaProject {
 
     PathFactory pathFactory
 
-    IdeaProject(XmlFileContentMerger ipr) {
+    /**
+     * An owner of this IDEA project.
+     * <p>
+     * If IdeaProject requires some information from gradle this field should not be used for this purpose.
+     */
+    final org.gradle.api.Project project
+
+    IdeaProject(org.gradle.api.Project project, XmlFileContentMerger ipr) {
+        this.project = project
         this.ipr = ipr
     }
 
     void mergeXmlProject(Project xmlProject) {
         ipr.beforeMerged.execute(xmlProject)
-        def modulePaths = getModules().collect {
-            getPathFactory().relativePath('PROJECT_DIR', it.outputFile)
-        }
-        xmlProject.configure(modulePaths, getJdkName(), getLanguageLevel(), getWildcards(), getProjectLibraries())
+        xmlProject.configure(getModules(), getJdkName(), getLanguageLevel(), getTargetBytecodeVersion(), getWildcards(), getProjectLibraries(), getVcs())
         ipr.whenMerged.execute(xmlProject)
     }
 }

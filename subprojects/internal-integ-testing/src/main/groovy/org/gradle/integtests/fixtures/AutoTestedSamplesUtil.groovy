@@ -34,7 +34,7 @@ class AutoTestedSamplesUtil {
     }
 
     String findDir(String dir) {
-        def workDir = SystemProperties.currentDir
+        def workDir = SystemProperties.instance.currentDir
         def candidates = [
             "$workDir/$dir",        //when ran from IDEA
             "$workDir/../../$dir"  //when ran from command line
@@ -56,6 +56,7 @@ I tried looking for a root folder here: $candidates
             sample = sample.replace('&lt;', '<')
             sample = sample.replace('&gt;', '>')
             sample = sample.replace('&amp;', '&')
+            sample = sample.replaceAll(/\{@literal ([^}]+)}/, '$1')
             try {
                 runner.call(file, sample)
             } catch (Exception e) {

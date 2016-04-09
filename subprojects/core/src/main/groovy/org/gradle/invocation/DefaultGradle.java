@@ -23,61 +23,50 @@ import org.gradle.StartParameter;
 import org.gradle.api.Action;
 import org.gradle.api.Project;
 import org.gradle.api.ProjectEvaluationListener;
-import org.gradle.api.internal.GradleDistributionLocator;
 import org.gradle.api.internal.GradleInternal;
 import org.gradle.api.internal.file.FileResolver;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
 import org.gradle.api.internal.initialization.ScriptHandlerFactory;
+import org.gradle.api.internal.plugins.DefaultObjectConfigurationAction;
+import org.gradle.api.internal.plugins.PluginManagerInternal;
 import org.gradle.api.internal.project.AbstractPluginAware;
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.invocation.Gradle;
-import org.gradle.api.plugins.PluginContainer;
 import org.gradle.configuration.ScriptPluginFactory;
 import org.gradle.execution.TaskGraphExecuter;
+import org.gradle.initialization.ClassLoaderScopeRegistry;
+import org.gradle.internal.event.ListenerBroadcast;
+import org.gradle.internal.event.ListenerManager;
+import org.gradle.internal.installation.CurrentGradleInstallation;
+import org.gradle.internal.installation.GradleInstallation;
 import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.internal.service.scopes.ServiceRegistryFactory;
 import org.gradle.listener.ActionBroadcast;
 import org.gradle.listener.ClosureBackedMethodInvocationDispatch;
-import org.gradle.listener.ListenerBroadcast;
-import org.gradle.listener.ListenerManager;
 import org.gradle.util.GradleVersion;
 
+import javax.inject.Inject;
 import java.io.File;
 
 public class DefaultGradle extends AbstractPluginAware implements GradleInternal {
     private ProjectInternal rootProject;
     private ProjectInternal defaultProject;
-    private final TaskGraphExecuter taskGraph;
     private final Gradle parent;
     private final StartParameter startParameter;
-    private final ListenerManager listenerManager;
     private final ServiceRegistry services;
-    private final GradleDistributionLocator distributionLocator;
     private final ListenerBroadcast<BuildListener> buildListenerBroadcast;
     private final ListenerBroadcast<ProjectEvaluationListener> projectEvaluationListenerBroadcast;
     private ActionBroadcast<Project> rootProjectActions = new ActionBroadcast<Project>();
 
-    private PluginContainer pluginContainer;
-    private FileResolver fileResolver;
-
-    private final ScriptPluginFactory scriptPluginFactory;
     private final ClassLoaderScope classLoaderScope;
-    private final ScriptHandlerFactory scriptHandlerFactory;
 
     public DefaultGradle(Gradle parent, StartParameter startParameter, ServiceRegistryFactory parentRegistry) {
         this.parent = parent;
         this.startParameter = startParameter;
         this.services = parentRegistry.createFor(this);
-        this.listenerManager = services.get(ListenerManager.class);
-        taskGraph = services.get(TaskGraphExecuter.class);
-        distributionLocator = services.get(GradleDistributionLocator.class);
-        classLoaderScope = services.get(ClassLoaderScope.class);
-        pluginContainer = services.get(PluginContainer.class);
-        fileResolver = services.get(FileResolver.class);
-        scriptPluginFactory = services.get(ScriptPluginFactory.class);
-        scriptHandlerFactory = services.get(ScriptHandlerFactory.class);
-        buildListenerBroadcast = listenerManager.createAnonymousBroadcaster(BuildListener.class);
-        projectEvaluationListenerBroadcast = listenerManager.createAnonymousBroadcaster(ProjectEvaluationListener.class);
+        classLoaderScope = services.get(ClassLoaderScopeRegistry.class).getCoreAndPluginsScope();
+        buildListenerBroadcast = getListenerManager().createAnonymousBroadcaster(BuildListener.class);
+        projectEvaluationListenerBroadcast = getListenerManager().createAnonymousBroadcaster(ProjectEvaluationListener.class);
         buildListenerBroadcast.add(new BuildAdapter() {
             @Override
             public void projectsLoaded(Gradle gradle) {
@@ -101,7 +90,8 @@ public class DefaultGradle extends AbstractPluginAware implements GradleInternal
     }
 
     public File getGradleHomeDir() {
-        return distributionLocator.getGradleHome();
+        GradleInstallation gradleInstallation = getCurrentGradleInstallation().getInstallation();
+        return gradleInstallation == null ? null : gradleInstallation.getGradleHome();
     }
 
     public File getGradleUserHomeDir() {
@@ -148,8 +138,9 @@ public class DefaultGradle extends AbstractPluginAware implements GradleInternal
         this.defaultProject = defaultProject;
     }
 
+    @Inject
     public TaskGraphExecuter getTaskGraph() {
-        return taskGraph;
+        throw new UnsupportedOperationException();
     }
 
     public ProjectEvaluationListener addProjectEvaluationListener(ProjectEvaluationListener listener) {
@@ -190,15 +181,15 @@ public class DefaultGradle extends AbstractPluginAware implements GradleInternal
     }
 
     public void addListener(Object listener) {
-        listenerManager.addListener(listener);
+        getListenerManager().addListener(listener);
     }
 
     public void removeListener(Object listener) {
-        listenerManager.removeListener(listener);
+        getListenerManager().removeListener(listener);
     }
 
     public void useLogger(Object logger) {
-        listenerManager.useLogger(logger);
+        getListenerManager().useLogger(logger);
     }
 
     public ProjectEvaluationListener getProjectEvaluationBroadcaster() {
@@ -221,31 +212,47 @@ public class DefaultGradle extends AbstractPluginAware implements GradleInternal
         return services;
     }
 
+    @Inject
     public ServiceRegistryFactory getServiceRegistryFactory() {
-        return services.get(ServiceRegistryFactory.class);
-    }
-
-    public PluginContainer getPlugins() {
-        return pluginContainer;
+        throw new UnsupportedOperationException();
     }
 
     @Override
-    protected FileResolver getFileResolver() {
-        return fileResolver;
+    protected DefaultObjectConfigurationAction createObjectConfigurationAction() {
+        return new DefaultObjectConfigurationAction(getFileResolver(), getScriptPluginFactory(), getScriptHandlerFactory(), getClassLoaderScope(), this);
     }
 
-    @Override
-    protected ScriptPluginFactory getScriptPluginFactory() {
-        return scriptPluginFactory;
-    }
-
-    @Override
-    protected ScriptHandlerFactory getScriptHandlerFactory() {
-        return scriptHandlerFactory;
-    }
-
-    @Override
     public ClassLoaderScope getClassLoaderScope() {
         return classLoaderScope;
+    }
+
+    @Inject
+    protected ScriptHandlerFactory getScriptHandlerFactory() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Inject
+    protected ScriptPluginFactory getScriptPluginFactory() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Inject
+    protected FileResolver getFileResolver() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Inject
+    protected CurrentGradleInstallation getCurrentGradleInstallation() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Inject
+    protected ListenerManager getListenerManager() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Inject
+    public PluginManagerInternal getPluginManager() {
+        throw new UnsupportedOperationException();
     }
 }

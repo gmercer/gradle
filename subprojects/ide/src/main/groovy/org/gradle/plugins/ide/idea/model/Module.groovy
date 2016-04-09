@@ -15,9 +15,8 @@
  */
 package org.gradle.plugins.ide.idea.model
 
-import org.gradle.api.internal.xml.XmlTransformer
+import org.gradle.internal.xml.XmlTransformer
 import org.gradle.plugins.ide.internal.generator.XmlPersistableConfigurationObject
-import org.gradle.util.DeprecationLogger
 
 /**
  * Represents the customizable elements of an iml (via XML hooks everything of the iml is customizable).
@@ -40,6 +39,11 @@ class Module extends XmlPersistableConfigurationObject {
      * The directories containing the test sources. Must not be null.
      */
     Set<Path> testSourceFolders = [] as LinkedHashSet
+
+    /**
+     * The directories containing generated the production sources. Must not be null.
+     */
+    Set<Path> generatedSourceFolders = [] as LinkedHashSet
 
     /**
      * The directories to be excluded. Must not be null.
@@ -69,28 +73,21 @@ class Module extends XmlPersistableConfigurationObject {
 
     String jdkName
 
-    String getJavaVersion() {
-        DeprecationLogger.nagUserOfReplacedMethod("javaVersion", "jdkName")
-        jdkName
-    }
-
-    void setJavaVersion(String jdkName) {
-        DeprecationLogger.nagUserOfReplacedMethod("javaVersion", "jdkName")
-        this.jdkName = jdkName
-    }
-
     private final PathFactory pathFactory
+    private String languageLevel
 
     Module(XmlTransformer withXmlActions, PathFactory pathFactory) {
         super(withXmlActions)
         this.pathFactory = pathFactory
     }
 
-    @Override protected String getDefaultResourceName() {
+    @Override
+    protected String getDefaultResourceName() {
         return 'defaultModule.xml'
     }
 
-    @Override protected void load(Node xml) {
+    @Override
+    protected void load(Node xml) {
         readJdkFromXml()
         readSourceAndExcludeFolderFromXml()
         readInheritOutputDirsFromXml()
@@ -109,6 +106,9 @@ class Module extends XmlPersistableConfigurationObject {
                 sourceFolders.add(pathFactory.path(sourceFolder.@url))
             } else {
                 testSourceFolders.add(pathFactory.path(sourceFolder.@url))
+            }
+            if (sourceFolder.@generated == 'true') {
+                generatedSourceFolders.add(pathFactory.path(sourceFolder.@url))
             }
         }
         findExcludeFolder().each { excludeFolder ->
@@ -150,12 +150,14 @@ class Module extends XmlPersistableConfigurationObject {
         }
     }
 
-    protected def configure(Path contentPath, Set sourceFolders, Set testSourceFolders, Set excludeFolders,
-                            Boolean inheritOutputDirs, Path outputDir, Path testOutputDir, Set dependencies, String jdkName) {
+    protected def configure(Path contentPath, Set sourceFolders, Set testSourceFolders, Set generatedSourceFolders, Set excludeFolders,
+                            Boolean inheritOutputDirs, Path outputDir, Path testOutputDir, Set dependencies, String jdkName, String languageLevel) {
+        this.languageLevel = languageLevel
         this.contentPath = contentPath
         this.sourceFolders.addAll(sourceFolders)
-        this.testSourceFolders.addAll(testSourceFolders)
         this.excludeFolders.addAll(excludeFolders)
+        this.testSourceFolders.addAll(testSourceFolders)
+        this.generatedSourceFolders.addAll(generatedSourceFolders)
         if (inheritOutputDirs != null) {
             this.inheritOutputDirs = inheritOutputDirs
         }
@@ -173,16 +175,24 @@ class Module extends XmlPersistableConfigurationObject {
         }
     }
 
-    @Override protected void store(Node xml) {
+    @Override
+    protected void store(Node xml) {
         addJdkToXml()
         setContentURL()
         removeSourceAndExcludeFolderFromXml()
         addSourceAndExcludeFolderToXml()
         writeInheritOutputDirsToXml()
+        writeSourceLanguageLevel()
         addOutputDirsToXml()
 
         removeDependenciesFromXml()
         addDependenciesToXml()
+    }
+
+    def writeSourceLanguageLevel() {
+        if(languageLevel != null){
+            findNewModuleRootManager().@"LANGUAGE_LEVEL" = languageLevel
+        }
     }
 
     private addJdkToXml() {
@@ -240,11 +250,21 @@ class Module extends XmlPersistableConfigurationObject {
 
     private addSourceAndExcludeFolderToXml() {
         sourceFolders.each { Path path ->
-            findContent().appendNode('sourceFolder', [url: path.url, isTestSource: 'false'])
+            if (generatedSourceFolders.contains(path)) {
+                findContent().appendNode('sourceFolder', [url: path.url, isTestSource: 'false', generated: 'true'])
+            } else {
+                findContent().appendNode('sourceFolder', [url: path.url, isTestSource: 'false'])
+            }
         }
+
         testSourceFolders.each { Path path ->
-            findContent().appendNode('sourceFolder', [url: path.url, isTestSource: 'true'])
+            if (generatedSourceFolders.contains(path)) {
+                findContent().appendNode('sourceFolder', [url: path.url, isTestSource: 'true', generated: 'true'])
+            } else {
+                findContent().appendNode('sourceFolder', [url: path.url, isTestSource: 'true'])
+            }
         }
+
         excludeFolders.each { Path path ->
             findContent().appendNode('excludeFolder', [url: path.url])
         }
@@ -288,7 +308,7 @@ class Module extends XmlPersistableConfigurationObject {
     }
 
     private Node findNewModuleRootManager() {
-        xml.component.find { it.@name == 'NewModuleRootManager'}
+        xml.component.find { it.@name == 'NewModuleRootManager' }
     }
 
     private Node findTestOutputDir() {
@@ -301,29 +321,52 @@ class Module extends XmlPersistableConfigurationObject {
 
 
     boolean equals(o) {
-        if (this.is(o)) { return true }
+        if (this.is(o)) {
+            return true
+        }
 
-        if (getClass() != o.class) { return false }
+        if (getClass() != o.class) {
+            return false
+        }
 
         Module module = (Module) o
 
-        if (dependencies != module.dependencies) { return false }
-        if (excludeFolders != module.excludeFolders) { return false }
-        if (outputDir != module.outputDir) { return false }
-        if (sourceFolders != module.sourceFolders) { return false }
-        if (testOutputDir != module.testOutputDir) { return false }
-        if (testSourceFolders != module.testSourceFolders) { return false }
+        if (dependencies != module.dependencies) {
+            return false
+        }
+        if (excludeFolders != module.excludeFolders) {
+            return false
+        }
+        if (outputDir != module.outputDir) {
+            return false
+        }
+        if (sourceFolders != module.sourceFolders) {
+            return false
+        }
+        if (generatedSourceFolders != module.generatedSourceFolders) {
+            return false
+        }
+        if (jdkName != module.jdkName) {
+            return false
+        }
+        if (testOutputDir != module.testOutputDir) {
+            return false
+        }
+        if (testSourceFolders != module.testSourceFolders) {
+            return false
+        }
 
         return true
     }
 
     int hashCode() {
         int result;
-
         result = (sourceFolders != null ? sourceFolders.hashCode() : 0)
+        result = 31 * result + (generatedSourceFolders != null ? generatedSourceFolders.hashCode() : 0)
         result = 31 * result + (testSourceFolders != null ? testSourceFolders.hashCode() : 0)
         result = 31 * result + (excludeFolders != null ? excludeFolders.hashCode() : 0)
         result = 31 * result + (inheritOutputDirs != null ? inheritOutputDirs.hashCode() : 0)
+        result = 31 * result + (jdkName != null ? jdkName.hashCode() : 0)
         result = 31 * result + outputDir.hashCode()
         result = 31 * result + testOutputDir.hashCode()
         result = 31 * result + (dependencies != null ? dependencies.hashCode() : 0)
@@ -333,13 +376,15 @@ class Module extends XmlPersistableConfigurationObject {
 
     String toString() {
         return "Module{" +
-                "dependencies=" + dependencies +
-                ", sourceFolders=" + sourceFolders +
-                ", testSourceFolders=" + testSourceFolders +
-                ", excludeFolders=" + excludeFolders +
-                ", inheritOutputDirs=" + inheritOutputDirs +
-                ", outputDir=" + outputDir +
-                ", testOutputDir=" + testOutputDir +
-                '}'
+            "dependencies=" + dependencies +
+            ", sourceFolders=" + sourceFolders +
+            ", testSourceFolders=" + testSourceFolders +
+            ", generatedSourceFolders=" + generatedSourceFolders +
+            ", excludeFolders=" + excludeFolders +
+            ", inheritOutputDirs=" + inheritOutputDirs +
+            ", jdkName=" + jdkName +
+            ", outputDir=" + outputDir +
+            ", testOutputDir=" + testOutputDir +
+            '}'
     }
 }

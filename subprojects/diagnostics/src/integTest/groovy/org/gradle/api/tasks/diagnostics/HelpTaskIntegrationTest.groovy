@@ -17,20 +17,45 @@ package org.gradle.api.tasks.diagnostics
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.TestResources
+import org.gradle.util.GradleVersion
 import org.junit.Rule
-
-import static org.gradle.util.TextUtil.toPlatformLineSeparators
 
 class HelpTaskIntegrationTest extends AbstractIntegrationSpec {
 
     @Rule
     public final TestResources resources = new TestResources(temporaryFolder)
 
+    def "shows basic welcome message for current project only"() {
+        given:
+        settingsFile << "include 'a', 'b', 'c'"
+
+        when:
+        run "help"
+
+        then:
+        result.normalizedOutput == """:help
+
+Welcome to Gradle ${GradleVersion.current().version}.
+
+To run a build, run gradle <task> ...
+
+To see a list of available tasks, run gradle tasks
+
+To see a list of command-line options, run gradle --help
+
+To see more detail about a task, run gradle help --task <task>
+
+BUILD SUCCESSFUL
+
+Total time: 1 secs
+"""
+    }
+
     def "can print help for implicit tasks"() {
         when:
         run "help", "--task", "dependencies"
         then:
-        output.contains(toPlatformLineSeparators("""Detailed task information for dependencies
+        output.contains """Detailed task information for dependencies
 
 Path
      :dependencies
@@ -44,15 +69,17 @@ Options
 Description
      Displays all dependencies declared in root project '${testDirectory.getName()}'.
 
-BUILD SUCCESSFUL"""))
-    }
+Group
+     help
 
+BUILD SUCCESSFUL"""
+    }
 
     def "can print help for placeholder added tasks"() {
         when:
         run "help", "--task", "help"
         then:
-        output.contains(toPlatformLineSeparators("""Detailed task information for help
+        output.contains """Detailed task information for help
 
 Path
      :help
@@ -64,11 +91,13 @@ Options
      --task     The task to show help for.
 
 Description
-     Displays a help message
+     Displays a help message.
 
-BUILD SUCCESSFUL"""))
+Group
+     help
+
+BUILD SUCCESSFUL"""
     }
-
 
     def "help for tasks same type different descriptions"() {
         setup:
@@ -88,7 +117,7 @@ include ":someproj"
         when:
         run "help", "--task", "hello"
         then:
-        output.contains(toPlatformLineSeparators("""Detailed task information for hello
+        output.contains """Detailed task information for hello
 
 Paths
      :hello
@@ -99,9 +128,58 @@ Type
 
 Descriptions
      (:hello) hello task from root
-     (:someproj:hello) hello task from someproj"""))
+     (:someproj:hello) hello task from someproj
+
+Group
+     -
+
+BUILD SUCCESSFUL"""
     }
 
+    def "help for tasks same type different groups"() {
+        setup:
+        settingsFile.text = """
+include ":someproj1"
+include ":someproj2"
+"""
+        buildFile.text = """
+        task hello {
+            group = "group of root task"
+        }
+        project(":someproj1"){
+            task hello {
+                group = "group of subproject task"
+            }
+        }
+        project(":someproj2"){
+            task hello {
+                group = "group of subproject task"
+            }
+        }
+"""
+        when:
+        run "help", "--task", "hello"
+        then:
+        output.contains """Detailed task information for hello
+
+Paths
+     :hello
+     :someproj1:hello
+     :someproj2:hello
+
+Type
+     Task (org.gradle.api.Task)
+
+Description
+     -
+
+Groups
+     (:hello) group of root task
+     (:someproj1:hello) group of subproject task
+     (:someproj2:hello) group of subproject task
+
+BUILD SUCCESSFUL"""
+    }
 
     def "matchingTasksOfSameType"() {
         setup:
@@ -110,7 +188,7 @@ Descriptions
         when:
         run "help", "--task", ":jar"
         then:
-        output.contains(toPlatformLineSeparators("""Detailed task information for :jar
+        output.contains """Detailed task information for :jar
 
 Path
      :jar
@@ -121,12 +199,15 @@ Type
 Description
      Assembles a jar archive containing the main classes.
 
-BUILD SUCCESSFUL"""))
+Group
+     build
+
+BUILD SUCCESSFUL"""
 
         when:
         run "help", "--task", "jar"
         then:
-        output.contains(toPlatformLineSeparators("""Detailed task information for jar
+        output.contains """Detailed task information for jar
 
 Paths
      :jar
@@ -138,7 +219,10 @@ Type
 Description
      Assembles a jar archive containing the main classes.
 
-BUILD SUCCESSFUL"""))
+Group
+     build
+
+BUILD SUCCESSFUL"""
 
     }
 
@@ -158,7 +242,7 @@ BUILD SUCCESSFUL"""))
         when:
         run "help", "--task", "someTask"
         then:
-        output.contains(toPlatformLineSeparators("""Detailed task information for someTask
+        output.contains """Detailed task information for someTask
 
 Path
      :subproj1:someTask
@@ -168,6 +252,9 @@ Type
 
 Description
      a copy operation
+
+Group
+     -
 
 ----------------------
 
@@ -180,9 +267,12 @@ Type
 Description
      an archiving operation
 
+Group
+     -
+
 ----------------------
 
-BUILD SUCCESSFUL"""))
+BUILD SUCCESSFUL"""
     }
 
     def "error message contains possible candidates"() {
@@ -192,7 +282,7 @@ BUILD SUCCESSFUL"""))
         when:
         fails "help", "--task", "bTask"
         then:
-        errorOutput.contains(" Task 'bTask' not found in root project '${testDirectory.getName()}'. Some candidates are: 'aTask', 'tasks'")
+        failure.assertHasCause("Task 'bTask' not found in root project '${testDirectory.getName()}'. Some candidates are: 'aTask', 'tasks'")
     }
 
     def "tasks can be defined by camelCase matching"() {
@@ -203,7 +293,7 @@ BUILD SUCCESSFUL"""))
         when:
         run "help", "--task", "sCC"
         then:
-        output.contains(toPlatformLineSeparators("""Detailed task information for sCC
+        output.contains """Detailed task information for sCC
 
 Path
      :someCamelCaseTask
@@ -212,11 +302,16 @@ Type
      Task (org.gradle.api.Task)
 
 Description
-     a description"""))
+     a description
+
+Group
+     -
+
+BUILD SUCCESSFUL"""
 
     }
 
-    def "prints hint when using invalid commandlineoptions"() {
+    def "prints hint when using invalid command line options"() {
         when:
         fails "help", "--tasssk", "help"
 
@@ -230,7 +325,7 @@ Description
         when:
         run "help", "--task", "hello"
         then:
-        output.contains(toPlatformLineSeparators("""Detailed task information for hello
+        output.contains """Detailed task information for hello
 
 Paths
      :hello
@@ -250,14 +345,19 @@ Options
                           GHIJKL
 
 Description
-     -"""))
+     -
+
+Group
+     -
+
+BUILD SUCCESSFUL"""
     }
 
     def "listsCommonDynamicAvailableValues"() {
         when:
         run "help", "--task", "hello"
         then:
-        output.contains(toPlatformLineSeparators("""Detailed task information for hello
+        output.contains """Detailed task information for hello
 
 Paths
      :sub1:hello
@@ -271,8 +371,28 @@ Options
                        Available values are:
                             optionA
                             optionB
+                            optionC
 
 Description
-     -"""))
+     -
+
+Group
+     -
+
+BUILD SUCCESSFUL"""
+    }
+
+    def "sortsOptionsBySpecifiedOrder"() {
+        when:
+        run "help", "--task", "hello"
+
+        then:
+        output.contains """
+Options
+     --valueC     descC
+
+     --valueB     descB
+
+     --valueA     descA"""
     }
 }

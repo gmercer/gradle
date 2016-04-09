@@ -15,15 +15,11 @@
  */
 package org.gradle.integtests.tooling.m5
 
-import org.gradle.integtests.tooling.fixture.TargetGradleVersion
-import org.gradle.integtests.tooling.fixture.ToolingApiVersion
 import org.gradle.integtests.tooling.fixture.ToolingApiSpecification
 import org.gradle.tooling.model.GradleProject
 import org.gradle.tooling.model.eclipse.EclipseProject
 import spock.lang.Issue
 
-@ToolingApiVersion('>=1.2')
-@TargetGradleVersion('>=1.0-milestone-8')
 class ToolingApiBuildableEclipseModelFixesCrossVersionSpec extends ToolingApiSpecification {
     @Issue("GRADLE-1529")
     //this is just one of the ways of fixing the problem. See the issue for details
@@ -55,15 +51,15 @@ project(':api') {
         file('settings.gradle').text = "include 'api', 'impl'"
 
         when:
-        EclipseProject eclipseProject = withConnection { connection -> connection.getModel(EclipseProject.class) }
+        EclipseProject eclipseProject = loadToolingModel(EclipseProject)
 
         then:
         def rootTasks = eclipseProject.gradleProject.tasks.collect { it.name }
 
-        EclipseProject api = eclipseProject.children[1]
+        EclipseProject api = eclipseProject.children.find { it.name == "api" }
         def apiTasks = api.gradleProject.tasks.collect { it.name }
 
-        EclipseProject impl = eclipseProject.children[0]
+        EclipseProject impl = eclipseProject.children.find { it.name == "impl" }
         def implTasks = impl.gradleProject.tasks.collect { it.name }
 
         ['eclipse', 'cleanEclipse', 'eclipseProject', 'cleanEclipseProject'].each {

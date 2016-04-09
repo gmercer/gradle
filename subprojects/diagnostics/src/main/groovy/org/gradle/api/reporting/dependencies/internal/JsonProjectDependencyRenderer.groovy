@@ -25,7 +25,8 @@ import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.result.DependencyResult
 import org.gradle.api.artifacts.result.ResolutionResult
 import org.gradle.api.internal.artifacts.DefaultModuleIdentifier
-import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionMatcher
+import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionComparator
+import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionSelectorScheme
 import org.gradle.api.specs.Spec
 import org.gradle.api.tasks.diagnostics.internal.graph.nodes.RenderableDependency
 import org.gradle.api.tasks.diagnostics.internal.graph.nodes.RenderableModuleResult
@@ -94,10 +95,12 @@ import org.gradle.util.GradleVersion
  * </pre>
  */
 class JsonProjectDependencyRenderer {
-    private final VersionMatcher versionMatcher
+    private final VersionSelectorScheme versionSelectorScheme
+    private final VersionComparator versionComparator
 
-    JsonProjectDependencyRenderer(VersionMatcher versionMatcher) {
-        this.versionMatcher = versionMatcher
+    JsonProjectDependencyRenderer(VersionSelectorScheme versionSelectorScheme, VersionComparator versionComparator) {
+        this.versionSelectorScheme = versionSelectorScheme
+        this.versionComparator = versionComparator
     }
 
     /**
@@ -211,7 +214,7 @@ class JsonProjectDependencyRenderer {
             }
         }
 
-        Collection<RenderableDependency> sortedDeps = new DependencyInsightReporter().prepare(selectedDependencies, versionMatcher)
+        Collection<RenderableDependency> sortedDeps = new DependencyInsightReporter().prepare(selectedDependencies, versionSelectorScheme, versionComparator)
         return sortedDeps.collect { dependency ->
             String name = replaceArrow(dependency.name);
             [

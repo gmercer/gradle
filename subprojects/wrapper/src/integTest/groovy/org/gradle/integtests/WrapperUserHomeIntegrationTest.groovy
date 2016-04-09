@@ -17,9 +17,11 @@
 package org.gradle.integtests
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.test.fixtures.file.TestFile
 import spock.lang.Issue
 
+@LeaksFileHandles
 class WrapperUserHomeIntegrationTest extends AbstractIntegrationSpec {
 
     void setup() {
@@ -56,7 +58,7 @@ class WrapperUserHomeIntegrationTest extends AbstractIntegrationSpec {
         installationIn gradleUserHome exists()
     }
 
-    @Issue('http://issues.gradle.org/browse/GRADLE-2802')
+    @Issue('https://issues.gradle.org/browse/GRADLE-2802')
     void 'uses gradle user home set by -g'() {
         given:
         prepareWrapper()

@@ -23,7 +23,7 @@ import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.invocation.Gradle;
 import org.gradle.api.logging.Logger;
 import org.gradle.initialization.BuildRequestMetaData;
-import org.gradle.logging.StyledTextOutputFactory;
+import org.gradle.internal.logging.StyledTextOutputFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -31,6 +31,7 @@ import java.util.List;
 /**
  * A {@link org.gradle.BuildListener} which logs the build progress.
  */
+@Deprecated
 public class BuildLogger implements BuildListener, TaskExecutionGraphListener {
     private final Logger logger;
     private final List<BuildListener> resultLoggers = new ArrayList<BuildListener>();
@@ -68,7 +69,7 @@ public class BuildLogger implements BuildListener, TaskExecutionGraphListener {
     }
 
     public void graphPopulated(TaskExecutionGraph graph) {
-        logger.info(String.format("Tasks to be executed: %s", graph.getAllTasks()));
+        logger.info("Tasks to be executed: {}", graph.getAllTasks());
     }
 
     public void buildFinished(BuildResult result) {

@@ -16,6 +16,7 @@
 
 package org.gradle.util;
 
+import org.gradle.internal.SystemProperties;
 import org.hamcrest.BaseMatcher;
 import org.hamcrest.Description;
 import org.hamcrest.Factory;
@@ -82,7 +83,7 @@ public class Matchers {
     public static <T extends CharSequence> Matcher<T> matchesRegexp(final String pattern) {
         return new BaseMatcher<T>() {
             public boolean matches(Object o) {
-                return Pattern.compile(pattern).matcher((CharSequence) o).matches();
+                return Pattern.compile(pattern, Pattern.DOTALL).matcher((CharSequence) o).matches();
             }
 
             public void describeTo(Description description) {
@@ -108,9 +109,8 @@ public class Matchers {
     public static <T extends CharSequence> Matcher<T> containsText(final String pattern) {
         return new BaseMatcher<T>() {
             public boolean matches(Object o) {
-                return Pattern.compile(pattern).matcher((CharSequence) o).find();
+                return ((String) o).contains(pattern);
             }
-
             public void describeTo(Description description) {
                 description.appendText("a CharSequence that contains text ").appendValue(pattern);
             }
@@ -261,6 +261,21 @@ public class Matchers {
 
             public void describeTo(Description description) {
                 description.appendText("an exception with message that is ").appendDescriptionOf(matcher);
+            }
+        };
+    }
+
+    @Factory
+    public static Matcher<String> normalizedLineSeparators(final Matcher<String> matcher) {
+        return new BaseMatcher<String>() {
+            public boolean matches(Object o) {
+                String string = (String) o;
+                return matcher.matches(string.replace(SystemProperties.getInstance().getLineSeparator(), "\n"));
+            }
+
+            public void describeTo(Description description) {
+                matcher.describeTo(description);
+                description.appendText(" (normalize line separators)");
             }
         };
     }

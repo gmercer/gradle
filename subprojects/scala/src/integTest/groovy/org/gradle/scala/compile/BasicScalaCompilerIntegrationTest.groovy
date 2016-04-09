@@ -16,8 +16,9 @@
 
 package org.gradle.scala.compile
 
-import org.gradle.integtests.fixtures.ClassFile
+
 import org.gradle.integtests.fixtures.MultiVersionIntegrationSpec
+import org.gradle.test.fixtures.file.ClassFile
 import org.gradle.util.VersionNumber
 
 abstract class BasicScalaCompilerIntegrationTest extends MultiVersionIntegrationSpec {
@@ -30,6 +31,8 @@ DeprecationLogger.whileDisabled {
     ${compilerConfiguration()}
 }
 """
+        // We've deprecated some getters that are used by all scala compiler calls.
+        executer.expectDeprecationWarning()
     }
 
     def compileGoodCode() {
@@ -106,6 +109,8 @@ compileScala.scalaCompileOptions.encoding = "ISO8859_7"
 """
 compileScala.scalaCompileOptions.debugLevel = "line"
 """
+        // This resets every time run is called.
+        executer.expectDeprecationWarning()
         run("compileScala")
 
         then:
@@ -122,6 +127,8 @@ compileScala.scalaCompileOptions.debugLevel = "line"
 """
 compileScala.scalaCompileOptions.debugLevel = "none"
 """
+        // This resets every time run is called.
+        executer.expectDeprecationWarning()
         run("compileScala")
 
         then:

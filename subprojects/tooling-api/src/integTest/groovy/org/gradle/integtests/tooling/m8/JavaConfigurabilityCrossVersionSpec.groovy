@@ -16,22 +16,18 @@
 
 package org.gradle.integtests.tooling.m8
 
-import org.gradle.integtests.tooling.fixture.TargetGradleVersion
 import org.gradle.integtests.tooling.fixture.ToolingApiSpecification
-import org.gradle.integtests.tooling.fixture.ToolingApiVersion
 import org.gradle.tooling.model.GradleProject
 import org.gradle.tooling.model.build.BuildEnvironment
 import spock.lang.Issue
 import spock.lang.Timeout
 
-@ToolingApiVersion('>=1.2')
-@TargetGradleVersion('>=1.0-milestone-8')
 class JavaConfigurabilityCrossVersionSpec extends ToolingApiSpecification {
 
     def setup() {
         //this test does not make any sense in embedded mode
         //as we don't own the process
-        toolingApi.isEmbedded = false
+        toolingApi.requireDaemons()
     }
 
     def "configures the java settings"() {
@@ -44,6 +40,7 @@ class JavaConfigurabilityCrossVersionSpec extends ToolingApiSpecification {
         }
 
         then:
+        env.java.javaHome
         env.java.jvmArguments.contains "-Xms13m"
         env.java.jvmArguments.contains "-Xmx333m"
     }
@@ -59,12 +56,13 @@ class JavaConfigurabilityCrossVersionSpec extends ToolingApiSpecification {
 
         then:
         env.java.javaHome
-        !env.java.jvmArguments.empty
+        env.java.jvmArguments.contains("-Xmx1024m")
+        env.java.jvmArguments.contains("-XX:+HeapDumpOnOutOfMemoryError")
     }
 
     def "tooling api provided jvm args take precedence over gradle.properties"() {
         file('build.gradle') << """
-assert java.lang.management.ManagementFactory.runtimeMXBean.inputArguments.contains('-Xmx23m')
+assert java.lang.management.ManagementFactory.runtimeMXBean.inputArguments.contains('-Xmx53m')
 assert System.getProperty('some-prop') == 'BBB'
 """
         file('gradle.properties') << "org.gradle.jvmargs=-Dsome-prop=AAA -Xmx16m"
@@ -72,7 +70,7 @@ assert System.getProperty('some-prop') == 'BBB'
         when:
         def model = withConnection {
             it.model(GradleProject.class)
-                .setJvmArguments('-Dsome-prop=BBB', '-Xmx23m')
+                .setJvmArguments('-Dsome-prop=BBB', '-Xmx53m')
                 .get()
         }
 

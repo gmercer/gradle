@@ -15,34 +15,25 @@
  */
 package org.gradle.tooling.internal.consumer;
 
-import com.google.common.collect.Lists;
-import org.gradle.api.GradleException;
+import org.gradle.api.Transformer;
 import org.gradle.tooling.BuildLauncher;
 import org.gradle.tooling.ResultHandler;
-import org.gradle.tooling.internal.adapter.ProtocolToModelAdapter;
 import org.gradle.tooling.internal.consumer.async.AsyncConsumerActionExecutor;
 import org.gradle.tooling.internal.consumer.connection.ConsumerAction;
 import org.gradle.tooling.internal.consumer.connection.ConsumerConnection;
 import org.gradle.tooling.internal.consumer.parameters.ConsumerOperationParameters;
-import org.gradle.tooling.internal.gradle.TaskListingLaunchable;
-import org.gradle.tooling.internal.protocol.InternalLaunchable;
 import org.gradle.tooling.model.Launchable;
 import org.gradle.tooling.model.Task;
-import org.gradle.tooling.model.TaskSelector;
 
-import java.lang.reflect.Proxy;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
 
-class DefaultBuildLauncher extends AbstractLongRunningOperation<DefaultBuildLauncher> implements BuildLauncher {
-    private final AsyncConsumerActionExecutor connection;
+public class DefaultBuildLauncher extends AbstractLongRunningOperation<DefaultBuildLauncher> implements BuildLauncher {
+    protected final AsyncConsumerActionExecutor connection;
 
     public DefaultBuildLauncher(AsyncConsumerActionExecutor connection, ConnectionParameters parameters) {
         super(parameters);
+        operationParamsBuilder.setEntryPoint("BuildLauncher API");
         operationParamsBuilder.setTasks(Collections.<String>emptyList());
         this.connection = connection;
     }
@@ -63,11 +54,7 @@ class DefaultBuildLauncher extends AbstractLongRunningOperation<DefaultBuildLaun
     }
 
     public BuildLauncher forTasks(Iterable<? extends Task> tasks) {
-        List<String> taskPaths = new ArrayList<String>();
-        for (Task task : tasks) {
-            taskPaths.add(task.getPath());
-        }
-        operationParamsBuilder.setTasks(taskPaths);
+        forLaunchables(tasks);
         return this;
     }
 
@@ -76,36 +63,12 @@ class DefaultBuildLauncher extends AbstractLongRunningOperation<DefaultBuildLaun
     }
 
     public BuildLauncher forLaunchables(Iterable<? extends Launchable> launchables) {
-        Set<String> taskPaths = new LinkedHashSet<String>();
-        List<InternalLaunchable> launchablesParams = Lists.newArrayList();
-        for (Launchable launchable : launchables) {
-            if (launchable instanceof Task) {
-                taskPaths.add(((Task) launchable).getPath());
-            } else if (launchable instanceof TaskListingLaunchable) {
-                taskPaths.addAll(((TaskListingLaunchable) launchable).getTaskNames());
-            } else if (!(launchable instanceof TaskSelector)) {
-                throw new GradleException("Only Task or TaskSelector instances are supported: "
-                        + (launchable != null ? launchable.getClass() : "null"));
-            }
-            maybeAddLaunchableParameter(launchablesParams, launchable);
-        }
-        operationParamsBuilder.setTasks(new ArrayList<String>(taskPaths));
-        operationParamsBuilder.setLaunchables(launchablesParams);
+        preprocessLaunchables(launchables);
+        operationParamsBuilder.setLaunchables(launchables);
         return this;
     }
 
-    private void maybeAddLaunchableParameter(List<InternalLaunchable> launchablesParams, Launchable launchable) {
-        Object original = launchable;
-        try {
-            if (Proxy.isProxyClass(launchable.getClass())) {
-                original = new ProtocolToModelAdapter().unpack(launchable);
-            }
-        } catch (IllegalArgumentException iae) {
-            // ignore: launchable created on consumer side for older provider
-        }
-        if (original instanceof InternalLaunchable) {
-            launchablesParams.add((InternalLaunchable) original);
-        }
+    protected void preprocessLaunchables(Iterable<? extends Launchable> launchables) {
     }
 
     public void run() {
@@ -115,26 +78,28 @@ class DefaultBuildLauncher extends AbstractLongRunningOperation<DefaultBuildLaun
     }
 
     public void run(final ResultHandler<? super Void> handler) {
-        final ConsumerOperationParameters operationParameters = operationParamsBuilder.setParameters(connectionParameters).build();
+        final ConsumerOperationParameters operationParameters = getConsumerOperationParameters();
+
         connection.run(new ConsumerAction<Void>() {
             public ConsumerOperationParameters getParameters() {
                 return operationParameters;
             }
 
             public Void run(ConsumerConnection connection) {
-                return connection.run(Void.class, operationParameters);
+                Void sink = connection.run(Void.class, operationParameters);
+                return sink;
             }
         }, new ResultHandlerAdapter(handler));
     }
 
     private class ResultHandlerAdapter extends org.gradle.tooling.internal.consumer.ResultHandlerAdapter<Void> {
         public ResultHandlerAdapter(ResultHandler<? super Void> handler) {
-            super(handler);
-        }
-
-        @Override
-        protected String connectionFailureMessage(Throwable failure) {
-            return String.format("Could not execute build using %s.", connection.getDisplayName());
+            super(handler, new ExceptionTransformer(new Transformer<String, Throwable>() {
+                @Override
+                public String transform(Throwable throwable) {
+                    return String.format("Could not execute build using %s.", connection.getDisplayName());
+                }
+            }));
         }
     }
 }

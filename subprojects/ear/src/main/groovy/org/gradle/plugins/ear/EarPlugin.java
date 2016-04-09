@@ -58,9 +58,9 @@ public class EarPlugin implements Plugin<Project> {
     }
 
     public void apply(final Project project) {
-        project.getPlugins().apply(BasePlugin.class);
+        project.getPluginManager().apply(BasePlugin.class);
 
-        final EarPluginConvention earPluginConvention = instantiator.newInstance(EarPluginConvention.class, fileResolver);
+        final EarPluginConvention earPluginConvention = instantiator.newInstance(EarPluginConvention.class, fileResolver, instantiator);
         project.getConvention().getPlugins().put("ear", earPluginConvention);
         earPluginConvention.setLibDirName("lib");
         earPluginConvention.setAppDirName("src/main/application");
@@ -158,10 +158,14 @@ public class EarPlugin implements Plugin<Project> {
         project.getTasks().withType(Ear.class, new Action<Ear>() {
             public void execute(Ear task) {
                 task.getConventionMapping().map("libDirName", new Callable<String>() {
-                    public String call() throws Exception { return earConvention.getLibDirName(); }
+                    public String call() throws Exception {
+                        return earConvention.getLibDirName();
+                    }
                 });
                 task.getConventionMapping().map("deploymentDescriptor", new Callable<DeploymentDescriptor>() {
-                    public DeploymentDescriptor call() throws Exception { return earConvention.getDeploymentDescriptor(); }
+                    public DeploymentDescriptor call() throws Exception {
+                        return earConvention.getDeploymentDescriptor();
+                    }
                 });
             }
         });

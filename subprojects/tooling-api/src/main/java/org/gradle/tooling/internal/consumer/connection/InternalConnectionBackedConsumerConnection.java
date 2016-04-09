@@ -16,10 +16,9 @@
 
 package org.gradle.tooling.internal.consumer.connection;
 
-import org.gradle.api.Action;
+import org.gradle.tooling.internal.adapter.CompatibleIntrospector;
 import org.gradle.tooling.internal.adapter.ProtocolToModelAdapter;
-import org.gradle.tooling.internal.adapter.SourceObjectMapping;
-import org.gradle.tooling.internal.consumer.converters.TaskPropertyHandlerFactory;
+import org.gradle.tooling.internal.consumer.ConnectionParameters;
 import org.gradle.tooling.internal.consumer.parameters.ConsumerOperationParameters;
 import org.gradle.tooling.internal.consumer.versioning.ModelMapping;
 import org.gradle.tooling.internal.consumer.versioning.VersionDetails;
@@ -32,33 +31,48 @@ import org.gradle.tooling.model.eclipse.HierarchicalEclipseProject;
 import org.gradle.tooling.model.idea.BasicIdeaProject;
 import org.gradle.tooling.model.idea.IdeaProject;
 import org.gradle.tooling.model.internal.Exceptions;
+import org.gradle.util.GradleVersion;
 
 /**
  * An adapter for a {@link InternalConnection} based provider.
+ *
+ * <p>Used for providers >= 1.0-milestone-8 and <= 1.1.</p>
  */
-public class InternalConnectionBackedConsumerConnection extends AbstractPre12ConsumerConnection {
+public class InternalConnectionBackedConsumerConnection extends AbstractConsumerConnection {
     private final ModelProducer modelProducer;
+    private final UnsupportedActionRunner actionRunner;
 
     public InternalConnectionBackedConsumerConnection(ConnectionVersion4 delegate, ModelMapping modelMapping, ProtocolToModelAdapter adapter) {
-        super(delegate, new R10M8VersionDetails(delegate.getMetaData().getVersion()), adapter);
-        ModelProducer consumerConnectionBackedModelProducer = new InternalConnectionBackedModelProducer(adapter, getVersionDetails(), modelMapping, (InternalConnection) delegate);
-        ModelProducer producerWithGradleBuild = new GradleBuildAdapterProducer(adapter, getVersionDetails(), modelMapping, consumerConnectionBackedModelProducer);
-        modelProducer = new BuildInvocationsAdapterProducer(adapter, getVersionDetails(), modelMapping, producerWithGradleBuild);
+        super(delegate, new R10M8VersionDetails(delegate.getMetaData().getVersion()));
+        ModelProducer modelProducer = new InternalConnectionBackedModelProducer(adapter, getVersionDetails(), modelMapping, (InternalConnection) delegate, this);
+        modelProducer = new GradleBuildAdapterProducer(adapter, modelProducer, this);
+        modelProducer = new BuildInvocationsAdapterProducer(adapter, getVersionDetails(), modelProducer);
+        modelProducer = new BuildExecutingModelProducer(modelProducer);
+        if (GradleVersion.version(getVersionDetails().getVersion()).compareTo(GradleVersion.version("1.0")) < 0) {
+            modelProducer = new NoCommandLineArgsModelProducer(modelProducer);
+        }
+        this.modelProducer = modelProducer;
+        this.actionRunner = new UnsupportedActionRunner(getVersionDetails().getVersion());
     }
 
     @Override
-    protected <T> T doGetModel(Class<T> modelType, ConsumerOperationParameters operationParameters) {
-        return modelProducer.produceModel(modelType, operationParameters);
+    protected ActionRunner getActionRunner() {
+        return actionRunner;
+    }
+
+    @Override
+    protected ModelProducer getModelProducer() {
+        return modelProducer;
+    }
+
+    @Override
+    public void configure(ConnectionParameters connectionParameters) {
+        new CompatibleIntrospector(getDelegate()).callSafely("configureLogging", connectionParameters.getVerboseLogging());
     }
 
     private static class R10M8VersionDetails extends VersionDetails {
         public R10M8VersionDetails(String version) {
             super(version);
-        }
-
-        @Override
-        public boolean supportsGradleProjectModel() {
-            return true;
         }
 
         @Override
@@ -73,14 +87,55 @@ public class InternalConnectionBackedConsumerConnection extends AbstractPre12Con
         }
     }
 
-    private class InternalConnectionBackedModelProducer extends AbstractModelProducer {
-        private final InternalConnection delegate;
-        private final Action<SourceObjectMapping> mapper;
+    private class NoCommandLineArgsModelProducer implements ModelProducer {
+        private final ModelProducer delegate;
 
-        public InternalConnectionBackedModelProducer(ProtocolToModelAdapter adapter, VersionDetails versionDetails, ModelMapping modelMapping, InternalConnection delegate) {
-            super(adapter, versionDetails, modelMapping);
+        public NoCommandLineArgsModelProducer(ModelProducer delegate) {
             this.delegate = delegate;
-            this.mapper = new TaskPropertyHandlerFactory().forVersion(versionDetails);
+        }
+
+        @Override
+        public <T> T produceModel(Class<T> type, ConsumerOperationParameters operationParameters) {
+            if (operationParameters.getArguments() != null && !operationParameters.getArguments().isEmpty()) {
+                 throw Exceptions.unsupportedOperationConfiguration(operationParameters.getEntryPointName() + " withArguments()", getVersionDetails().getVersion(), "1.0");
+            }
+            return delegate.produceModel(type, operationParameters);
+        }
+    }
+
+    private class BuildExecutingModelProducer implements ModelProducer {
+        private final ModelProducer delegate;
+
+        private BuildExecutingModelProducer(ModelProducer delegate) {
+            this.delegate = delegate;
+        }
+
+        public <T> T produceModel(Class<T> type, ConsumerOperationParameters operationParameters) {
+            if (type.equals(Void.class)) {
+                getDelegate().executeBuild(operationParameters, operationParameters);
+                return null;
+            } else {
+                if (operationParameters.getTasks() != null) {
+                    throw Exceptions.unsupportedOperationConfiguration(operationParameters.getEntryPointName() + " forTasks()", getVersionDetails().getVersion(), "1.2");
+                }
+                return delegate.produceModel(type, operationParameters);
+            }
+        }
+    }
+
+    private static class InternalConnectionBackedModelProducer implements ModelProducer {
+        private final ProtocolToModelAdapter adapter;
+        private final VersionDetails versionDetails;
+        private final ModelMapping modelMapping;
+        private final InternalConnection delegate;
+        private final HasCompatibilityMapperAction mapperProvider;
+
+        public InternalConnectionBackedModelProducer(ProtocolToModelAdapter adapter, VersionDetails versionDetails, ModelMapping modelMapping, InternalConnection delegate, HasCompatibilityMapperAction mapperProvider) {
+            this.adapter = adapter;
+            this.versionDetails = versionDetails;
+            this.modelMapping = modelMapping;
+            this.delegate = delegate;
+            this.mapperProvider = mapperProvider;
         }
 
         public <T> T produceModel(Class<T> type, ConsumerOperationParameters operationParameters) {
@@ -89,7 +144,7 @@ public class InternalConnectionBackedConsumerConnection extends AbstractPre12Con
                 throw Exceptions.unsupportedModel(type, versionDetails.getVersion());
             }
             Class<?> protocolType = modelMapping.getProtocolType(type);
-            return adapter.adapt(type, delegate.getTheModel(protocolType, operationParameters), mapper);
+            return adapter.adapt(type, delegate.getTheModel(protocolType, operationParameters), mapperProvider.getCompatibilityMapperAction(operationParameters));
         }
     }
 }

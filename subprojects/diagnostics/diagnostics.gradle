@@ -18,9 +18,15 @@ dependencies {
     compile libraries.groovy
     compile project(':core')
     compile project(':reporting')
-    compile project(':plugins')
-    compile project(':coreImpl')
+    compile project(':platformBase')
+    compile project(':dependencyManagement')
+
+    integTestRuntime project(':plugins')
+    integTestRuntime project(':platformNative')
+    integTestRuntime project(':languageNative')
 }
 
 useTestFixtures()
-useTestFixtures(project: ':coreImpl')
+useTestFixtures(project: ':dependencyManagement')
+useTestFixtures(project: ':platformNative', sourceSet: 'testFixtures')
+useTestFixtures(project: ":logging")

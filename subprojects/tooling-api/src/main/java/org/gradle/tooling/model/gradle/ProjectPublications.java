@@ -17,7 +17,9 @@
 package org.gradle.tooling.model.gradle;
 
 import org.gradle.api.Incubating;
+import org.gradle.tooling.model.ProjectIdentifier;
 import org.gradle.tooling.model.DomainObjectSet;
+import org.gradle.tooling.model.Model;
 
 /**
  * A model providing information about the publications of a Gradle project.
@@ -25,7 +27,15 @@ import org.gradle.tooling.model.DomainObjectSet;
  * @since 1.12
  */
 @Incubating
-public interface ProjectPublications {
+public interface ProjectPublications extends Model {
+
+    /**
+     * Returns the identifier for the Gradle project that these invocations originate from.
+     *
+     * @since 2.13
+     */
+    @Incubating
+    ProjectIdentifier getProjectIdentifier();
 
     /**
      * Returns the publications for this project.

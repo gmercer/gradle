@@ -20,18 +20,17 @@ import groovy.lang.Closure;
 import org.gradle.api.Incubating;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
-import org.gradle.api.UncheckedIOException;
 import org.gradle.api.internal.ConventionTask;
-import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionMatcher;
+import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionComparator;
+import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionSelectorScheme;
 import org.gradle.api.reporting.Reporting;
 import org.gradle.api.reporting.dependencies.internal.DefaultDependencyReportContainer;
+import org.gradle.api.reporting.dependencies.internal.HtmlDependencyReporter;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.TaskAction;
-import org.gradle.api.reporting.dependencies.internal.HtmlDependencyReporter;
 import org.gradle.internal.reflect.Instantiator;
 
 import javax.inject.Inject;
-import java.io.IOException;
 import java.util.Set;
 
 /**
@@ -70,10 +69,12 @@ public class HtmlDependencyReportTask extends ConventionTask implements Reportin
         });
     }
 
+    @Override
     public DependencyReportContainer getReports() {
         return reports;
     }
 
+    @Override
     public DependencyReportContainer reports(Closure closure) {
         reports.configure(closure);
         return reports;
@@ -85,7 +86,12 @@ public class HtmlDependencyReportTask extends ConventionTask implements Reportin
     }
 
     @Inject
-    protected VersionMatcher getVersionMatcher() {
+    protected VersionSelectorScheme getVersionSelectorScheme() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Inject
+    protected VersionComparator getVersionComparator() {
         throw new UnsupportedOperationException();
     }
 
@@ -96,13 +102,8 @@ public class HtmlDependencyReportTask extends ConventionTask implements Reportin
             return;
         }
 
-        try {
-            HtmlDependencyReporter reporter = new HtmlDependencyReporter(getVersionMatcher());
-            reporter.setOutputDirectory(reports.getHtml().getDestination());
-            reporter.generate(getProjects());
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        HtmlDependencyReporter reporter = new HtmlDependencyReporter(getVersionSelectorScheme(), getVersionComparator());
+        reporter.render(getProjects(), reports.getHtml().getDestination());
     }
 
     /**

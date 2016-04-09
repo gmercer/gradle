@@ -27,8 +27,8 @@ import org.gradle.api.tasks.InputFiles;
 import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.TaskAction;
 import org.gradle.internal.classpath.DefaultClassPath;
-import org.gradle.logging.ProgressLogger;
-import org.gradle.logging.ProgressLoggerFactory;
+import org.gradle.internal.logging.ProgressLogger;
+import org.gradle.internal.logging.ProgressLoggerFactory;
 import org.mortbay.jetty.Connector;
 import org.mortbay.jetty.RequestLog;
 import org.mortbay.jetty.Server;
@@ -298,7 +298,7 @@ public abstract class AbstractJettyRunTask extends ConventionTask {
         Set<String> systemClasses = new LinkedHashSet<String>(Arrays.asList(webAppConfig.getSystemClasses()));
         systemClasses.remove("org.apache.commons.logging.");
         systemClasses.remove("org.apache.log4j.");
-        webAppConfig.setSystemClasses(systemClasses.toArray(new String[systemClasses.size()]));
+        webAppConfig.setSystemClasses(systemClasses.toArray(new String[0]));
 
         webAppConfig.setParentLoaderPriority(false);
 

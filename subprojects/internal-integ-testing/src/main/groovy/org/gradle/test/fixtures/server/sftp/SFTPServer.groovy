@@ -17,19 +17,15 @@
 package org.gradle.test.fixtures.server.sftp
 
 import org.apache.commons.io.FileUtils
-import org.apache.commons.io.FilenameUtils
 import org.apache.sshd.SshServer
 import org.apache.sshd.common.NamedFactory
-import org.apache.sshd.common.Session
-import org.apache.sshd.common.file.FileSystemView
 import org.apache.sshd.common.file.virtualfs.VirtualFileSystemFactory
-import org.apache.sshd.common.file.virtualfs.VirtualFileSystemView
+import org.apache.sshd.common.keyprovider.AbstractKeyPairProvider
 import org.apache.sshd.common.util.Buffer
 import org.apache.sshd.server.Command
 import org.apache.sshd.server.PasswordAuthenticator
 import org.apache.sshd.server.PublickeyAuthenticator
 import org.apache.sshd.server.command.ScpCommandFactory
-import org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider
 import org.apache.sshd.server.session.ServerSession
 import org.apache.sshd.server.sftp.SftpSubsystem
 import org.gradle.test.fixtures.file.TestDirectoryProvider
@@ -39,11 +35,13 @@ import org.gradle.test.fixtures.server.ExpectOne
 import org.gradle.test.fixtures.server.RepositoryServer
 import org.gradle.test.fixtures.server.ServerExpectation
 import org.gradle.test.fixtures.server.ServerWithExpectations
-import org.gradle.util.AvailablePortFinder
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
+import java.security.KeyPair
+import java.security.KeyPairGenerator
 import java.security.PublicKey
+import java.security.SecureRandom
 
 class SFTPServer extends ServerWithExpectations implements RepositoryServer {
 
@@ -59,6 +57,7 @@ class SFTPServer extends ServerWithExpectations implements RepositoryServer {
     Map<Integer, String> handleCreatedByRequest = [:]
     Map<String, Integer> openingRequestIdForPath = [:]
     List<SftpExpectation> expectations = []
+    private boolean passwordAuthenticationEnabled = true;
 
     public SFTPServer(TestDirectoryProvider testDirectoryProvider) {
         this.testDirectoryProvider = testDirectoryProvider;
@@ -80,28 +79,48 @@ class SFTPServer extends ServerWithExpectations implements RepositoryServer {
         }
     }
 
+    /**
+     * this basically restarts the sftpserver without
+     * registering a password authentication
+     * */
+    public withPasswordAuthenticationDisabled(){
+        passwordAuthenticationEnabled = false;
+        restart()
+    }
+
     protected void before() throws Throwable {
         baseDir = testDirectoryProvider.getTestDirectory().createDir("sshd/files")
         configDir = testDirectoryProvider.getTestDirectory().createDir("sshd/config")
 
-        def portFinder = AvailablePortFinder.createPrivate()
-        port = portFinder.nextAvailable
-        sshd = setupConfiguredTestSshd()
+        // Set the port to 0 to have it automatically assign a port
+        sshd = setupConfiguredTestSshd(0)
         sshd.start()
+        port = sshd.getPort()
         allowInit()
     }
 
-    public void stop() {
-        sshd?.stop()
+    public void stop(boolean immediately = true) {
+        sshd?.stop(immediately)
     }
 
-    private SshServer setupConfiguredTestSshd() {
+    public void restart() {
+        stop(true)
+        before()
+    }
+
+    @Override
+    protected void after() {
+        super.after();
+        passwordAuthenticationEnabled = true
+    }
+
+    private SshServer setupConfiguredTestSshd(int sshPort) {
         //copy dsa key to config directory
         URL fileUrl = ClassLoader.getSystemResource("sshd-config/test-dsa.key");
         FileUtils.copyURLToFile(fileUrl, new File(configDir, "test-dsa.key"));
 
         SshServer sshServer = SshServer.setUpDefaultServer();
-        sshServer.setPort(port);
+        sshServer.setPort(sshPort);
         sshServer.setFileSystemFactory(new TestVirtualFileSystemFactory());
         sshServer.setSubsystemFactories(Arrays.<NamedFactory<Command>> asList(new SftpSubsystem.Factory() {
             Command create() {
@@ -109,8 +128,12 @@ class SFTPServer extends ServerWithExpectations implements RepositoryServer {
             }
         }));
         sshServer.setCommandFactory(new ScpCommandFactory());
-        sshServer.setKeyPairProvider(new SimpleGeneratorHostKeyProvider("${configDir}/test-dsa.key"));
-        sshServer.setPasswordAuthenticator(new DummyPasswordAuthenticator());
+        sshServer.setKeyPairProvider(new GeneratingKeyPairProvider());
+
+        if(passwordAuthenticationEnabled){
+            sshServer.setPasswordAuthenticator(new DummyPasswordAuthenticator());
+        }
+
         sshServer.setPublickeyAuthenticator(new PublickeyAuthenticator() {
             boolean authenticate(String username, PublicKey key, ServerSession session) {
                 return true
@@ -118,6 +141,7 @@ class SFTPServer extends ServerWithExpectations implements RepositoryServer {
         });
         return sshServer;
     }
+
 
     boolean hasFile(String filePathToCheck) {
         new File(baseDir, filePathToCheck).exists()
@@ -129,6 +153,10 @@ class SFTPServer extends ServerWithExpectations implements RepositoryServer {
 
     URI getUri() {
         return new URI("sftp://${hostAddress}:${port}")
+    }
+
+    void allowAll() {
+        expectations << new SftpAllowAll()
     }
 
     void allowInit() {
@@ -162,7 +190,6 @@ class SFTPServer extends ServerWithExpectations implements RepositoryServer {
     }
 
     void expectFileUpload(String path) {
-        expectLstat(FilenameUtils.getFullPathNoEndSeparator(path))
         expectOpen(path)
         allowWrite(path)
         expectClose(path)
@@ -243,11 +270,8 @@ class SFTPServer extends ServerWithExpectations implements RepositoryServer {
     }
 
     class TestVirtualFileSystemFactory extends VirtualFileSystemFactory {
-        /**
-         * Create the appropriate user file system view.
-         */
-        public FileSystemView createFileSystemView(Session session) {
-            return new VirtualFileSystemView(session.getUsername(), baseDir.absolutePath);
+        TestVirtualFileSystemFactory() {
+            setDefaultHomeDir(baseDir.absolutePath)
         }
     }
 
@@ -262,7 +286,7 @@ class SFTPServer extends ServerWithExpectations implements RepositoryServer {
 
             int pos = buffer.rpos()
             def command = commandMessage(buffer, type)
-            println "Received SFTP command $command"
+            println ("Handling $command")
             buffer.rpos(pos)
 
             def matched = expectations.find { it.matches(buffer, type, id) }
@@ -336,7 +360,7 @@ class SFTPServer extends ServerWithExpectations implements RepositoryServer {
 
         SftpExpectOne(int type, String notMetMessage, boolean failing = false, boolean missing = false) {
             this.expectedType = type
-            this.notMetMessage = "Expected SFTP command not recieved: $notMetMessage"
+            this.notMetMessage = "Expected SFTP command not received: $notMetMessage"
             this.matcher = matcher
             this.failing = failing
             this.missing = missing
@@ -419,6 +443,20 @@ class SFTPServer extends ServerWithExpectations implements RepositoryServer {
         }
     }
 
+    class SftpAllowAll implements SftpExpectation {
+
+        final boolean failing = false
+        final boolean missing = false
+
+        boolean matches(Buffer buffer, int type, int id) {
+            return true
+        }
+
+        void assertMet() {
+            //can never be not met
+        }
+    }
+
     class SftpAllowHandle implements SftpExpectation {
 
         final int expectedType
@@ -446,6 +484,22 @@ class SFTPServer extends ServerWithExpectations implements RepositoryServer {
             } else {
                 return false
             }
+        }
+    }
+
+    class GeneratingKeyPairProvider extends AbstractKeyPairProvider {
+
+        KeyPair keyPair
+
+        GeneratingKeyPairProvider() {
+            KeyPairGenerator generator = KeyPairGenerator.getInstance("DSA")
+            generator.initialize(1024, SecureRandom.getInstance("SHA1PRNG"))
+            keyPair = generator.generateKeyPair()
+        }
+
+        @Override
+        Iterable<KeyPair> loadKeys() {
+            [keyPair]
         }
     }
 }

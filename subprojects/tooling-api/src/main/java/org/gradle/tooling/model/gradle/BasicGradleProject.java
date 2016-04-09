@@ -18,6 +18,7 @@ package org.gradle.tooling.model.gradle;
 
 import org.gradle.api.Incubating;
 import org.gradle.api.Nullable;
+import org.gradle.tooling.model.ProjectIdentifier;
 import org.gradle.tooling.model.DomainObjectSet;
 import org.gradle.tooling.model.Model;
 
@@ -30,6 +31,14 @@ import java.io.File;
  */
 @Incubating
 public interface BasicGradleProject extends Model {
+    /**
+     * Returns the identifier for this Gradle project.
+     *
+     * @since 2.13
+     */
+    @Incubating
+    ProjectIdentifier getProjectIdentifier();
+
     /**
      * Returns the name of this project. Note that the name is not a unique identifier for the project.
      *
@@ -63,7 +72,6 @@ public interface BasicGradleProject extends Model {
      * Returns the child projects of this project, or the empty set if there are no child projects.
      *
      * @return The child projects of this project, or the empty set if there are no child projects.
-     * @since 1.0-milestone-5
      */
     DomainObjectSet<? extends BasicGradleProject> getChildren();
 }

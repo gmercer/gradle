@@ -27,7 +27,7 @@ import org.gradle.util.ConfigureUtil;
 import java.util.*;
 
 public abstract class AbstractPolymorphicDomainObjectContainer<T>
-        extends AbstractNamedDomainObjectContainer<T> implements PolymorphicDomainObjectContainer<T> {
+        extends AbstractNamedDomainObjectContainer<T> implements PolymorphicDomainObjectContainerInternal<T> {
 
     private final ContainerElementsDynamicObject elementsDynamicObject = new ContainerElementsDynamicObject();
     private final Convention convention;
@@ -37,10 +37,6 @@ public abstract class AbstractPolymorphicDomainObjectContainer<T>
         super(type, instantiator, namer);
         this.convention = new DefaultConvention(instantiator);
         this.dynamicObject = new ExtensibleDynamicObject(this, new ContainerDynamicObject(elementsDynamicObject), convention);
-    }
-
-    protected AbstractPolymorphicDomainObjectContainer(Class<T> type, Instantiator instantiator) {
-        this(type, instantiator, Named.Namer.forType(type));
     }
 
     protected abstract <U extends T> U doCreate(String name, Class<U> type);

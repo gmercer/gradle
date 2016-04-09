@@ -17,10 +17,8 @@ package org.gradle.integtests.tooling.r112
 
 import org.gradle.integtests.tooling.fixture.TargetGradleVersion
 import org.gradle.integtests.tooling.fixture.ToolingApiSpecification
-import org.gradle.integtests.tooling.fixture.ToolingApiVersion
 import spock.lang.Issue
 
-@ToolingApiVersion(">=1.2")
 @TargetGradleVersion(">=1.10")
 class TestFilteringCrossVersionSpec extends ToolingApiSpecification {
     @Issue("GRADLE-2972")
@@ -28,7 +26,7 @@ class TestFilteringCrossVersionSpec extends ToolingApiSpecification {
         buildFile << """
             apply plugin: 'java'
             repositories { mavenCentral() }
-            dependencies { testCompile 'junit:junit:4.11' }
+            dependencies { testCompile 'junit:junit:4.12' }
             compileTestJava.options.fork = true
         """
 

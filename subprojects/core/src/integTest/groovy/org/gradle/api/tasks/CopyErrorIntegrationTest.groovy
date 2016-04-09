@@ -21,12 +21,37 @@ import org.gradle.test.fixtures.file.TestFile
 import org.gradle.util.PreconditionVerifier
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
+import org.hamcrest.Matchers
 import org.junit.Assert
 import org.junit.Rule
 import org.junit.Test
 
 class CopyErrorIntegrationTest extends AbstractIntegrationTest {
     @Rule public PreconditionVerifier verifier = new PreconditionVerifier()
+
+    @Test
+    public void givesReasonableErrorMessageWhenPathCannotBeConverted() {
+        file('src/thing.txt').createFile()
+
+        testFile('build.gradle') << '''
+            task copy(type: Copy) {
+                from('src') {
+                    into project.repositories
+                }
+                into 'dest'
+            }
+'''
+
+        ExecutionFailure failure = inTestDirectory().withTasks('copy').runWithFailure()
+        failure.assertHasCause("""Cannot convert the provided notation to a String: [].
+The following types/formats are supported:
+  - String or CharSequence instances, for example 'some/path'.
+  - Boolean values, for example true, Boolean.TRUE.
+  - Number values, for example 42, 3.14.
+  - A File instance
+  - A Closure that returns any supported value.
+  - A Callable that returns any supported value.""")
+    }
 
     @Test
     @Requires(TestPrecondition.SYMLINKS)
@@ -70,7 +95,10 @@ class CopyErrorIntegrationTest extends AbstractIntegrationTest {
     '''
 
             ExecutionFailure failure = inTestDirectory().withTasks('copy').runWithFailure()
-            failure.assertHasDescription("Could not list contents of directory '${dir}' as it is not readable.")
+            failure.assertThatDescription(Matchers.anyOf(
+                Matchers.startsWith("Could not list contents of directory '${dir}' as it is not readable."),
+                Matchers.startsWith("Could not read path '${dir}'.")
+            ))
         } finally {
             dir.permissions = oldPermissions
         }

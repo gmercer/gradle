@@ -15,6 +15,8 @@
  */
 package org.gradle.tooling;
 
+import org.gradle.api.Incubating;
+import org.gradle.tooling.connection.GradleConnectionBuilder;
 import org.gradle.tooling.internal.consumer.ConnectorServices;
 
 import java.io.File;
@@ -61,12 +63,33 @@ public abstract class GradleConnector {
      * @since 1.0-milestone-3
      */
     public static GradleConnector newConnector() {
-        return new ConnectorServices().createConnector();
+        return ConnectorServices.createConnector();
     }
 
     /**
-     * Specifies which Gradle installation to use. This replaces any value specified using {@link #useDistribution(java.net.URI)} or {@link #useGradleVersion(String)}. Defaults to a project-specific
-     * Gradle version.
+     * Creates a new connection builder instance for creating Gradle composite builds.
+     *
+     * @return The instance. Never returns null.
+     * @since 2.13
+     */
+    @Incubating
+    public static GradleConnectionBuilder newGradleConnection() {
+        return ConnectorServices.createGradleConnectionBuilder();
+    }
+
+    /**
+     * Creates a new {@link CancellationTokenSource} that can be used to cancel one or more {@link org.gradle.tooling.LongRunningOperation} executions.
+     *
+     * @return The instance. Never returns {@code null}.
+     * @since 2.1
+     */
+    public static CancellationTokenSource newCancellationTokenSource() {
+        return ConnectorServices.createCancellationTokenSource();
+    }
+
+    /**
+     * Specifies which Gradle installation to use. This replaces any value specified using {@link #useDistribution(URI)}, {@link #useGradleVersion(String)}, or {@link #useBuildDistribution()}.
+     * Defaults to a project-specific Gradle version.
      *
      * @param gradleHome The Gradle installation directory.
      * @return this
@@ -76,7 +99,7 @@ public abstract class GradleConnector {
 
     /**
      * Specifies which Gradle version to use. The appropriate distribution is downloaded and installed into the user's Gradle home directory. This replaces any value specified using {@link
-     * #useInstallation(java.io.File)} or {@link #useDistribution(java.net.URI)}. Defaults to a project-specific Gradle version.
+     * #useInstallation(File)}, {@link #useDistribution(URI)}, or {@link #useBuildDistribution()}. Defaults to a project-specific Gradle version.
      *
      * @param gradleVersion The version to use.
      * @return this
@@ -86,13 +109,23 @@ public abstract class GradleConnector {
 
     /**
      * Specifies which Gradle distribution to use. The appropriate distribution is downloaded and installed into the user's Gradle home directory. This replaces any value specified using {@link
-     * #useInstallation(java.io.File)} or {@link #useGradleVersion(String)}. Defaults to a project-specific Gradle version.
+     * #useInstallation(File)}, {@link #useGradleVersion(String)}, or {@link #useBuildDistribution()}. Defaults to a project-specific Gradle version.
      *
      * @param gradleDistribution The distribution to use.
      * @return this
      * @since 1.0-milestone-3
      */
     public abstract GradleConnector useDistribution(URI gradleDistribution);
+
+    /**
+     * Specifies to use the Gradle distribution defined by the target Gradle build. The appropriate distribution defined by the target Gradle build is downloaded and installed into the user's
+     * Gradle home directory. If the target Gradle build does not define the distribution that it should be built with, the Gradle version of this connector is used. This replaces any value
+     * specified using {@link #useInstallation(File)}, {@link #useDistribution(URI)}, or {@link #useGradleVersion(String)}. Acts as the default behavior.
+     *
+     * @return this
+     * @since 2.3
+     */
+    public abstract GradleConnector useBuildDistribution();
 
     /**
      * Specifies the working directory to use.
@@ -120,6 +153,6 @@ public abstract class GradleConnector {
      * @throws GradleConnectionException On failure to establish a connection with the target Gradle version.
      * @since 1.0-milestone-3
      */
-    public abstract ProjectConnection connect() throws GradleConnectionException, UnsupportedVersionException;
+    public abstract ProjectConnection connect() throws GradleConnectionException;
 
 }

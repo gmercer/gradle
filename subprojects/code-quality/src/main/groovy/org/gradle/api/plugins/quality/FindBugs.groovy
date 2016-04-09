@@ -15,22 +15,20 @@
  */
 package org.gradle.api.plugins.quality
 
-import org.gradle.api.GradleException
-import org.gradle.api.file.FileCollection
-import org.gradle.api.plugins.quality.internal.FindBugsReportsImpl
-import org.gradle.api.plugins.quality.internal.findbugs.FindBugsWorkerManager
-import org.gradle.api.plugins.quality.internal.findbugs.FindBugsResult
-import org.gradle.api.plugins.quality.internal.findbugs.FindBugsSpec
-import org.gradle.api.plugins.quality.internal.findbugs.FindBugsSpecBuilder
-import org.gradle.api.reporting.Reporting
-import org.gradle.api.tasks.*
-import org.gradle.api.logging.LogLevel
-import org.gradle.internal.Factory
-import org.gradle.internal.reflect.Instantiator
-import org.gradle.logging.ConsoleRenderer
-import org.gradle.process.internal.WorkerProcessBuilder
-
 import groovy.transform.PackageScope
+import org.gradle.api.GradleException
+import org.gradle.api.Incubating
+import org.gradle.api.JavaVersion
+import org.gradle.api.file.FileCollection
+import org.gradle.api.logging.LogLevel
+import org.gradle.api.plugins.quality.internal.FindBugsReportsImpl
+import org.gradle.api.plugins.quality.internal.findbugs.*
+import org.gradle.api.reporting.Reporting
+import org.gradle.api.resources.TextResource
+import org.gradle.api.tasks.*
+import org.gradle.internal.reflect.Instantiator
+import org.gradle.internal.logging.ConsoleRenderer
+import org.gradle.process.internal.worker.WorkerProcessFactory
 
 import javax.inject.Inject
 
@@ -113,18 +111,47 @@ class FindBugs extends SourceTask implements VerificationTask, Reporting<FindBug
     Collection<String> omitVisitors = []
 
     /**
-     * The filename of a filter specifying which bugs are reported.
+     * A filter specifying which bugs are reported. Replaces the {@code includeFilter} property.
+     *
+     * @since 2.2
      */
-    @InputFile
+    @Incubating
+    @Nested
     @Optional
-    File includeFilter
+    TextResource includeFilterConfig
 
     /**
-     * The filename of a filter specifying bugs to exclude from being reported.
+     * A filter specifying bugs to exclude from being reported. Replaces the {@code excludeFilter} property.
+     *
+     * @since 2.2
      */
-    @InputFile
+    @Incubating
+    @Nested
     @Optional
-    File excludeFilter
+    TextResource excludeFilterConfig
+
+    /**
+     * A filter specifying baseline bugs to exclude from being reported.
+     */
+    @Incubating
+    @Nested
+    @Optional
+    TextResource excludeBugsFilterConfig
+
+    /**
+     * Any additional arguments (not covered here more explicitly like {@code effort}) to be passed along to FindBugs.
+     * <p>
+     * Extra arguments are passed to FindBugs after the arguments Gradle understands (like {@code effort} but before the list of classes to analyze.
+     * This should only be used for arguments that cannot be provided by Gradle directly. Gradle does not try to interpret or validate the arguments
+     * before passing them to FindBugs.
+     * <p>
+     * See the <a href="https://code.google.com/p/findbugs/source/browse/findbugs/src/java/edu/umd/cs/findbugs/TextUICommandLine.java">FindBugs TextUICommandLine source</a> for available options.
+     *
+     * @since 2.6
+     */
+    @Input
+    @Optional
+    Collection<String> extraArgs = []
 
     @Nested
     private final FindBugsReportsImpl reports
@@ -139,7 +166,7 @@ class FindBugs extends SourceTask implements VerificationTask, Reporting<FindBug
     }
 
     @Inject
-    Factory<WorkerProcessBuilder> getWorkerProcessBuilderFactory() {
+    WorkerProcessFactory getWorkerProcessBuilderFactory() {
         throw new UnsupportedOperationException();
     }
 
@@ -174,8 +201,52 @@ class FindBugs extends SourceTask implements VerificationTask, Reporting<FindBug
         reports.configure(closure)
     }
 
+    /**
+     * The filename of a filter specifying which bugs are reported.
+     */
+    File getIncludeFilter() {
+        getIncludeFilterConfig()?.asFile()
+    }
+
+    /**
+     * The filename of a filter specifying which bugs are reported.
+     */
+    void setIncludeFilter(File filter) {
+        setIncludeFilterConfig(project.resources.text.fromFile(filter))
+    }
+
+    /**
+     * The filename of a filter specifying bugs to exclude from being reported.
+     */
+    File getExcludeFilter() {
+        getExcludeFilterConfig()?.asFile()
+    }
+
+    /**
+     * The filename of a filter specifying bugs to exclude from being reported.
+     */
+    void setExcludeFilter(File filter) {
+        setExcludeFilterConfig(project.resources.text.fromFile(filter))
+    }
+
+    /**
+     * The filename of a filter specifying baseline bugs to exclude from being reported.
+     */
+    File getExcludeBugsFilter() {
+        getExcludeBugsFilterConfig()?.asFile()
+    }
+
+    /**
+     * The filename of a filter specifying baseline bugs to exclude from being reported.
+     */
+    void setExcludeBugsFilter(File filter) {
+        setExcludeBugsFilterConfig(project.resources.text.fromFile(filter))
+    }
+
     @TaskAction
     void run() {
+        new FindBugsClasspathValidator(JavaVersion.current()).validateClasspath(getFindbugsClasspath().files*.name)
+
         FindBugsSpec spec = generateSpec()
         FindBugsWorkerManager manager = new FindBugsWorkerManager()
 
@@ -203,6 +274,8 @@ class FindBugs extends SourceTask implements VerificationTask, Reporting<FindBug
             .withOmitVisitors(getOmitVisitors())
             .withExcludeFilter(getExcludeFilter())
             .withIncludeFilter(getIncludeFilter())
+            .withExcludeBugsFilter(getExcludeBugsFilter())
+            .withExtraArgs(getExtraArgs())
             .configureReports(getReports())
 
         return specBuilder.build()
@@ -232,5 +305,17 @@ class FindBugs extends SourceTask implements VerificationTask, Reporting<FindBug
                 throw new GradleException(message)
             }
         }
+    }
+
+    public FindBugs extraArgs(Iterable<String> arguments) {
+        for ( String argument : arguments ) {
+            extraArgs.add(argument);
+        }
+        return this;
+    }
+
+    public FindBugs extraArgs(String... arguments) {
+        extraArgs.addAll( Arrays.asList(arguments) );
+        return this;
     }
 }

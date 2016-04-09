@@ -15,17 +15,20 @@
  */
 package org.gradle.launcher.daemon.server.exec;
 
-import org.gradle.initialization.GradleLauncherFactory;
-import org.gradle.internal.nativeplatform.ProcessEnvironment;
+import com.google.common.collect.ImmutableList;
+import org.gradle.internal.nativeintegration.ProcessEnvironment;
+import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.launcher.daemon.context.DaemonContext;
 import org.gradle.launcher.daemon.diagnostics.DaemonDiagnostics;
 import org.gradle.launcher.daemon.protocol.Command;
-import org.gradle.logging.LoggingManagerInternal;
-import org.gradle.logging.internal.LoggingOutputInternal;
+import org.gradle.launcher.daemon.server.api.*;
+import org.gradle.launcher.daemon.server.health.DaemonHealthServices;
+import org.gradle.launcher.exec.BuildActionExecuter;
+import org.gradle.launcher.exec.BuildActionParameters;
+import org.gradle.internal.logging.LoggingManagerInternal;
+import org.gradle.internal.logging.internal.LoggingOutputInternal;
 
 import java.io.File;
-import java.util.Arrays;
-import java.util.LinkedList;
 import java.util.List;
 
 /**
@@ -33,46 +36,48 @@ import java.util.List;
  */
 public class DefaultDaemonCommandExecuter implements DaemonCommandExecuter {
     private final LoggingOutputInternal loggingOutput;
-    private final GradleLauncherFactory launcherFactory;
-    private DaemonCommandAction hygieneAction;
+    private final BuildActionExecuter<BuildActionParameters> actionExecuter;
+    private final DaemonHealthServices healthServices;
     private final ProcessEnvironment processEnvironment;
     private final File daemonLog;
+    private final ServiceRegistry contextServices;
 
-    public DefaultDaemonCommandExecuter(GradleLauncherFactory launcherFactory, ProcessEnvironment processEnvironment,
-                                        LoggingManagerInternal loggingOutput, File daemonLog, DaemonCommandAction hygieneAction) {
+    public DefaultDaemonCommandExecuter(BuildActionExecuter<BuildActionParameters> actionExecuter, ServiceRegistry contextServices, ProcessEnvironment processEnvironment,
+                                        LoggingManagerInternal loggingOutput, File daemonLog, DaemonHealthServices healthServices) {
         this.processEnvironment = processEnvironment;
         this.daemonLog = daemonLog;
         this.loggingOutput = loggingOutput;
-        this.launcherFactory = launcherFactory;
-        this.hygieneAction = hygieneAction;
+        this.actionExecuter = actionExecuter;
+        this.healthServices = healthServices;
+        this.contextServices = contextServices;
     }
 
-    public void executeCommand(DaemonConnection connection, Command command, DaemonContext daemonContext, DaemonStateControl daemonStateControl, Runnable commandAbandoned) {
+    public void executeCommand(DaemonConnection connection, Command command, DaemonContext daemonContext, DaemonStateControl daemonStateControl) {
         new DaemonCommandExecution(
             connection,
             command,
             daemonContext,
             daemonStateControl,
-            commandAbandoned,
             createActions(daemonContext)
         ).proceed();
     }
 
     protected List<DaemonCommandAction> createActions(DaemonContext daemonContext) {
         DaemonDiagnostics daemonDiagnostics = new DaemonDiagnostics(daemonLog, daemonContext.getPid());
-        return new LinkedList<DaemonCommandAction>(Arrays.asList(
-            new CatchAndForwardDaemonFailure(),
-            hygieneAction,
+        return ImmutableList.of(
             new HandleStop(),
-            new StartBuildOrRespondWithBusy(daemonDiagnostics),
+            new HandleCancel(),
+            new ReturnResult(),
+            new StartBuildOrRespondWithBusy(daemonDiagnostics), // from this point down, the daemon is 'busy'
+            healthServices.getGCHintAction(), //TODO SF needs to happen after the result is returned to the client
             new EstablishBuildEnvironment(processEnvironment),
             new LogToClient(loggingOutput, daemonDiagnostics), // from this point down, logging is sent back to the client
+            healthServices.getHealthTrackerAction(),
             new ForwardClientInput(),
-            new ReturnResult(),
-            new StartStopIfBuildAndStop(),
+            new RequestStopIfSingleUsedDaemon(),
             new ResetDeprecationLogger(),
             new WatchForDisconnection(),
-            new ExecuteBuild(launcherFactory)
-        ));
+            new ExecuteBuild(actionExecuter, contextServices)
+        );
     }
 }

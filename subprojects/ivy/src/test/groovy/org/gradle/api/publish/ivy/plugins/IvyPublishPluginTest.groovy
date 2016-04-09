@@ -16,23 +16,18 @@
 
 package org.gradle.api.publish.ivy.plugins
 
-import org.gradle.api.internal.project.ProjectInternal
-import org.gradle.api.internal.tasks.TaskContainerInternal
-import org.gradle.api.internal.xml.XmlTransformer
 import org.gradle.api.publish.PublishingExtension
 import org.gradle.api.publish.ivy.IvyPublication
 import org.gradle.api.publish.ivy.internal.publication.DefaultIvyPublication
 import org.gradle.api.publish.ivy.internal.publication.IvyPublicationInternal
-import org.gradle.util.TestUtil
-import spock.lang.Specification
+import org.gradle.internal.xml.XmlTransformer
+import org.gradle.platform.base.PlatformBaseSpecification
 
-class IvyPublishPluginTest extends Specification {
-
-    ProjectInternal project = TestUtil.createRootProject()
+class IvyPublishPluginTest extends PlatformBaseSpecification {
     PublishingExtension publishing
 
     def setup() {
-        project.plugins.apply(IvyPublishPlugin)
+        project.pluginManager.apply(IvyPublishPlugin)
         publishing = project.extensions.getByType(PublishingExtension)
     }
 
@@ -54,12 +49,12 @@ class IvyPublishPluginTest extends Specification {
         when:
         publishing.publications.create("test", IvyPublication)
         publishing.repositories { ivy { url = "http://foo.com" } }
-        project.modelRegistry.get(TaskContainerInternal.MODEL_PATH, Object)
+        realizeTasks()
         def publishTask = project.tasks["publishTestPublicationToIvyRepository"]
 
         then:
         publishTask != null
-        project.tasks["publish"].dependsOn.contains publishTask
+        project.tasks["publish"].dependsOn.contains publishTask.name
     }
 
     def "ivy publication coordinates are a snapshot of project identity"() {
@@ -72,7 +67,7 @@ class IvyPublishPluginTest extends Specification {
         publishing.publications.create("test", IvyPublication)
 
         then:
-        with (publishing.publications.test) {
+        with(publishing.publications.test) {
             identity.module == project.name
             identity.organisation == "foo"
             identity.revision == "1.0"
@@ -84,7 +79,7 @@ class IvyPublishPluginTest extends Specification {
         project.version = "changed-version"
 
         then:
-        with (publishing.publications.test) {
+        with(publishing.publications.test) {
             identity.organisation == "foo"
             identity.revision == "1.0"
         }

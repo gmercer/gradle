@@ -24,6 +24,7 @@ import org.gradle.api.Transformer;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URL;
+import java.util.regex.Pattern;
 
 /**
  * Utility transformers.
@@ -81,11 +82,12 @@ public abstract class Transformers {
      * @return The naming transformer.
      */
     public static Transformer<String, Named> name() {
-        return name(new Named.Namer());
+        return name(Named.Namer.INSTANCE);
     }
 
     /**
      * Returns a transformer that names objects with the given {@link Namer}
+     *
      * @param namer The namer to name the objects with
      * @param <T> The type of objects to be named
      * @return The naming transformer.
@@ -107,6 +109,37 @@ public abstract class Transformers {
     }
 
     /**
+     * Transforms strings which may have spaces and which may have already been escaped with
+     * quotes into safe command-line arguments.
+     */
+    public static Transformer<String, String> asSafeCommandLineArgument() {
+        return new CommandLineArgumentTransformer();
+    }
+
+    private static class CommandLineArgumentTransformer implements Transformer<String, String> {
+        private static final Pattern SINGLE_QUOTED = Pattern.compile("^'.*'$");
+        private static final Pattern DOUBLE_QUOTED = Pattern.compile("^\".*\"$");
+        private static final Pattern A_SINGLE_QUOTE =  Pattern.compile("'");
+
+        @Override
+        public String transform(String input) {
+            if (SINGLE_QUOTED.matcher(input).matches() || DOUBLE_QUOTED.matcher(input).matches() || !input.contains(" ")) {
+                return input;
+            } else {
+                return wrapWithSingleQuotes(input);
+            }
+        }
+
+        private String wrapWithSingleQuotes(String input) {
+            return String.format("'%1$s'", escapeSingleQuotes(input));
+        }
+
+        private String escapeSingleQuotes(String input) {
+            return A_SINGLE_QUOTE.matcher(input).replaceAll("\\\\'");
+        }
+    }
+
+    /**
      * A getClass() transformer.
      *
      * @param <T> The type of the object
@@ -122,9 +155,14 @@ public abstract class Transformers {
         };
     }
 
-    /**
-     * Converts an {@link Action} to a {@link Transformer} that runs the action against the input value and returns {@code null}.
-     */
+    public static <R> Transformer<R, Object> toTransformer(final Factory<R> factory) {
+        return new Transformer<R, Object>() {
+            public R transform(Object original) {
+                return factory.create();
+            }
+        };
+    }
+
     public static <R, I> Transformer<R, I> toTransformer(final Action<? super I> action) {
         return new Transformer<R, I>() {
             public R transform(I original) {
@@ -145,6 +183,17 @@ public abstract class Transformers {
                 } catch (MalformedURLException e) {
                     throw UncheckedException.throwAsUncheckedException(e);
                 }
+            }
+        };
+    }
+
+    /**
+     * Always returns the given argument.
+     */
+    public static <T, I> Transformer<T, I> constant(final T t) {
+        return new Transformer<T, I>() {
+            public T transform(I original) {
+                return t;
             }
         };
     }

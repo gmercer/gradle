@@ -20,6 +20,7 @@ import org.gradle.api.plugins.quality.internal.AbstractCodeQualityPlugin
 import org.gradle.api.tasks.SourceSet
 
 class CodeNarcPlugin extends AbstractCodeQualityPlugin<CodeNarc> {
+    public static final String DEFAULT_CODENARC_VERSION = "0.24.1"
     private CodeNarcExtension extension
 
     @Override
@@ -39,10 +40,10 @@ class CodeNarcPlugin extends AbstractCodeQualityPlugin<CodeNarc> {
 
     @Override
     protected CodeQualityExtension createExtension() {
-        extension = project.extensions.create("codenarc", CodeNarcExtension)
+        extension = project.extensions.create("codenarc", CodeNarcExtension, project)
         extension.with {
-            toolVersion = "0.18"
-            configFile = project.rootProject.file("config/codenarc/codenarc.xml")
+            toolVersion = DEFAULT_CODENARC_VERSION
+            config = project.resources.text.fromFile(project.rootProject.file("config/codenarc/codenarc.xml"))
             maxPriority1Violations = 0
             maxPriority2Violations = 0
             maxPriority3Violations = 0
@@ -53,15 +54,13 @@ class CodeNarcPlugin extends AbstractCodeQualityPlugin<CodeNarc> {
 
     @Override
     protected void configureTaskDefaults(CodeNarc task, String baseName) {
-        def config = project.configurations['codenarc']
-        config.incoming.beforeResolve {
-            if (config.dependencies.empty) {
-                config.dependencies.add(project.dependencies.create("org.codenarc:CodeNarc:$extension.toolVersion"))
-            }
+        def codenarcConfiguration = project.configurations['codenarc']
+        codenarcConfiguration.defaultDependencies { dependencies ->
+            dependencies.add(this.project.dependencies.create("org.codenarc:CodeNarc:${this.extension.toolVersion}"))
         }
         task.conventionMapping.with {
-            codenarcClasspath = { config }
-            configFile = { extension.configFile }
+            codenarcClasspath = { codenarcConfiguration }
+            config = { extension.config }
             maxPriority1Violations = { extension.maxPriority1Violations }
             maxPriority2Violations = { extension.maxPriority2Violations }
             maxPriority3Violations = { extension.maxPriority3Violations }

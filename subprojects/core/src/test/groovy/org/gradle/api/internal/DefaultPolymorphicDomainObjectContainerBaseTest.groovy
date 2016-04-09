@@ -16,6 +16,7 @@
 package org.gradle.api.internal
 
 import org.gradle.internal.reflect.Instantiator
+import org.gradle.model.internal.core.NamedEntityInstantiator
 
 class DefaultPolymorphicDomainObjectContainerBaseTest extends AbstractNamedDomainObjectContainerTest {
     def setup() {
@@ -29,6 +30,11 @@ class PolymorphicTestContainer extends AbstractPolymorphicDomainObjectContainer<
     }
 
     @Override
+    NamedEntityInstantiator<TestObject> getEntityInstantiator() {
+        throw new UnsupportedOperationException()
+    }
+
+    @Override
     protected TestObject doCreate(String name) {
         def testObject = new TestObject(instantiator)
         testObject.name = name
@@ -38,5 +44,10 @@ class PolymorphicTestContainer extends AbstractPolymorphicDomainObjectContainer<
     @Override
     protected <U extends TestObject> U doCreate(String name, Class<U> type) {
         throw new UnsupportedOperationException("doCreate")
+    }
+
+    @Override
+    Set<? extends Class<? extends TestObject>> getCreateableTypes() {
+        Collections.singleton(TestObject)
     }
 }

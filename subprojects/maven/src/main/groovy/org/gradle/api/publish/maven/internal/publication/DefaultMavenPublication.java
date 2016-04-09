@@ -18,17 +18,15 @@ package org.gradle.api.publish.maven.internal.publication;
 
 import org.gradle.api.Action;
 import org.gradle.api.InvalidUserDataException;
-import org.gradle.api.artifacts.ModuleDependency;
-import org.gradle.api.artifacts.ModuleVersionIdentifier;
-import org.gradle.api.artifacts.ProjectDependency;
-import org.gradle.api.artifacts.PublishArtifact;
+import org.gradle.api.artifacts.*;
 import org.gradle.api.component.SoftwareComponent;
 import org.gradle.api.file.FileCollection;
+import org.gradle.api.internal.artifacts.DefaultExcludeRule;
 import org.gradle.api.internal.artifacts.DefaultModuleVersionIdentifier;
 import org.gradle.api.internal.component.SoftwareComponentInternal;
 import org.gradle.api.internal.component.Usage;
+import org.gradle.api.internal.file.FileCollectionFactory;
 import org.gradle.api.internal.file.UnionFileCollection;
-import org.gradle.internal.typeconversion.NotationParser;
 import org.gradle.api.publish.internal.ProjectDependencyPublicationResolver;
 import org.gradle.api.publish.maven.MavenArtifact;
 import org.gradle.api.publish.maven.MavenArtifactSet;
@@ -38,15 +36,26 @@ import org.gradle.api.publish.maven.internal.dependencies.DefaultMavenDependency
 import org.gradle.api.publish.maven.internal.dependencies.MavenDependencyInternal;
 import org.gradle.api.publish.maven.internal.publisher.MavenNormalizedPublication;
 import org.gradle.api.publish.maven.internal.publisher.MavenProjectIdentity;
+import org.gradle.api.specs.Spec;
 import org.gradle.internal.reflect.Instantiator;
-import org.gradle.util.GUtil;
+import org.gradle.internal.typeconversion.NotationParser;
+import org.gradle.util.CollectionUtils;
 
 import java.io.File;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
 public class DefaultMavenPublication implements MavenPublicationInternal {
 
+    /**
+     * Maven supports wildcards in exclusion rules according to:
+     * http://www.smartjava.org/content/maven-and-wildcard-exclusions
+     * https://issues.apache.org/jira/browse/MNG-3832
+     * This should be used for non-transitive dependencies
+     * @return
+     */
+    private static final Set<ExcludeRule> EXCLUDE_ALL_RULE = Collections.<ExcludeRule>singleton(new DefaultExcludeRule("*", "*"));
     private final String name;
     private final MavenPomInternal pom;
     private final MavenProjectIdentity projectIdentity;
@@ -58,12 +67,12 @@ public class DefaultMavenPublication implements MavenPublicationInternal {
 
     public DefaultMavenPublication(
             String name, MavenProjectIdentity projectIdentity, NotationParser<Object, MavenArtifact> mavenArtifactParser, Instantiator instantiator,
-            ProjectDependencyPublicationResolver projectDependencyResolver
+            ProjectDependencyPublicationResolver projectDependencyResolver, FileCollectionFactory fileCollectionFactory
     ) {
         this.name = name;
         this.projectDependencyResolver = projectDependencyResolver;
         this.projectIdentity = new DefaultMavenProjectIdentity(projectIdentity.getGroupId(), projectIdentity.getArtifactId(), projectIdentity.getVersion());
-        mavenArtifacts = instantiator.newInstance(DefaultMavenArtifactSet.class, name, mavenArtifactParser);
+        mavenArtifacts = instantiator.newInstance(DefaultMavenArtifactSet.class, name, mavenArtifactParser, fileCollectionFactory);
         pom = instantiator.newInstance(DefaultMavenPom.class, this);
     }
 
@@ -109,12 +118,16 @@ public class DefaultMavenPublication implements MavenPublicationInternal {
 
     private void addProjectDependency(ProjectDependency dependency) {
         ModuleVersionIdentifier identifier = projectDependencyResolver.resolve(dependency);
-        runtimeDependencies.add(new DefaultMavenDependency(identifier.getGroup(), identifier.getName(), identifier.getVersion()));
+        runtimeDependencies.add(new DefaultMavenDependency(identifier.getGroup(), identifier.getName(), identifier.getVersion(), Collections.<DependencyArtifact>emptyList(), getExcludeRules(dependency)));
     }
 
     private void addModuleDependency(ModuleDependency dependency) {
-        runtimeDependencies.add(new DefaultMavenDependency(dependency.getGroup(), dependency.getName(), dependency.getVersion(), dependency.getArtifacts()));
-     }
+        runtimeDependencies.add(new DefaultMavenDependency(dependency.getGroup(), dependency.getName(), dependency.getVersion(), dependency.getArtifacts(), getExcludeRules(dependency)));
+    }
+
+    private static Set<ExcludeRule> getExcludeRules(ModuleDependency dependency) {
+        return dependency.isTransitive() ? dependency.getExcludeRules() : EXCLUDE_ALL_RULE;
+    }
 
     public MavenArtifact artifact(Object source) {
         return mavenArtifacts.artifact(source);
@@ -172,7 +185,7 @@ public class DefaultMavenPublication implements MavenPublicationInternal {
     }
 
     public MavenNormalizedPublication asNormalisedPublication() {
-        return new MavenNormalizedPublication(name, getPomFile(), projectIdentity, getArtifacts());
+        return new MavenNormalizedPublication(name, getPomFile(), projectIdentity, getArtifacts(), determineMainArtifact());
     }
 
     private File getPomFile() {
@@ -183,12 +196,46 @@ public class DefaultMavenPublication implements MavenPublicationInternal {
     }
 
     public String determinePackagingFromArtifacts() {
-        for (MavenArtifact mavenArtifact : mavenArtifacts) {
-            if (!GUtil.isTrue(mavenArtifact.getClassifier()) && GUtil.isTrue(mavenArtifact.getExtension())) {
-                return mavenArtifact.getExtension();
-            }
+        Set<MavenArtifact> unclassifiedArtifacts = getUnclassifiedArtifactsWithExtension();
+        if (unclassifiedArtifacts.size() == 1) {
+            return unclassifiedArtifacts.iterator().next().getExtension();
         }
         return "pom";
+    }
+
+    private MavenArtifact determineMainArtifact() {
+        Set<MavenArtifact> unclassifiedArtifacts = getUnclassifiedArtifactsWithExtension();
+        if (unclassifiedArtifacts.isEmpty()) {
+            return null;
+        }
+        if (unclassifiedArtifacts.size() == 1) {
+            // Pom packaging doesn't matter when we have a single unclassified artifact
+            return unclassifiedArtifacts.iterator().next();
+        }
+        for (MavenArtifact unclassifiedArtifact : unclassifiedArtifacts) {
+            // With multiple unclassified artifacts, choose the one with extension matching pom packaging
+            String packaging = pom.getPackaging();
+            if (unclassifiedArtifact.getExtension().equals(packaging)) {
+                return unclassifiedArtifact;
+            }
+        }
+        return null;
+    }
+
+    private Set<MavenArtifact> getUnclassifiedArtifactsWithExtension() {
+        return CollectionUtils.filter(mavenArtifacts, new Spec<MavenArtifact>() {
+            public boolean isSatisfiedBy(MavenArtifact mavenArtifact) {
+                return hasNoClassifier(mavenArtifact) && hasExtension(mavenArtifact);
+            }
+        });
+    }
+
+    private boolean hasNoClassifier(MavenArtifact element) {
+        return element.getClassifier() == null || element.getClassifier().length() == 0;
+    }
+
+    private boolean hasExtension(MavenArtifact element) {
+        return element.getExtension() != null && element.getExtension().length() > 0;
     }
 
     public ModuleVersionIdentifier getCoordinates() {

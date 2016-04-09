@@ -16,41 +16,66 @@
 
 package org.gradle.performance.fixture;
 
-import org.gradle.integtests.fixtures.executer.GradleExecuter;
 import org.gradle.performance.measure.DataAmount;
 import org.gradle.performance.measure.MeasuredOperation;
+import org.gradle.util.GFileUtils;
 
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.text.DecimalFormatSymbols;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class GCLoggingCollector implements DataCollector {
     private File logFile;
 
-    public void beforeExecute(File testProjectDir, GradleExecuter executer) {
-        logFile = new File(testProjectDir, "gc.txt");
-        executer.withGradleOpts("-verbosegc", "-XX:+PrintGCDetails", "-Xloggc:" + logFile.getAbsolutePath());
+    @Override
+    public List<String> getAdditionalJvmOpts(File workingDir) {
+        logFile = new File(workingDir, "gc.txt");
+        return Arrays.asList(
+                "-verbosegc",
+                "-XX:+PrintGCDetails",
+                "-XX:+PrintGCDateStamps",
+                "-Xloggc:" + logFile.getAbsolutePath(),
+                "-XX:-PrintGCTimeStamps"
+        );
     }
 
-    public void collect(File testProjectDir, MeasuredOperation operation) {
+    @Override
+    public List<String> getAdditionalArgs(File workingDir) {
+        return Collections.emptyList();
+    }
+
+    public void collect(BuildExperimentInvocationInfo invocationInfo, MeasuredOperation operation) {
+        collect(operation, Locale.getDefault());
+        if (logFile.exists() && invocationInfo != null) {
+            LogFiles.copyLogFile(logFile, invocationInfo, "gc_", ".txt");
+        }
+    }
+
+    public void collect(MeasuredOperation operation, Locale locale) {
         try {
             BufferedReader reader = new BufferedReader(new FileReader(logFile));
             try {
-                collect(reader, operation);
+                collect(new WaitingReader(reader), operation, locale);
             } finally {
                 reader.close();
             }
         } catch (Exception e) {
-            throw new RuntimeException(String.format("Could not process garbage collector log %s.", logFile), e);
+            throw new RuntimeException(String.format("Could not process garbage collector log %s. File contents:\n%s", logFile, GFileUtils.readFileQuietly(logFile)), e);
         }
     }
 
-    private void collect(BufferedReader reader, MeasuredOperation operation) throws IOException {
-        Pattern collectionEventPattern = Pattern.compile("\\d+\\.\\d+: \\[(?:(?:Full GC(?: [^\\s]+)?)|GC) (\\d+\\.\\d+: )?\\[.*\\] (\\d+)K->(\\d+)K\\((\\d+)K\\)");
+    private void collect(WaitingReader reader, MeasuredOperation operation, Locale locale) throws IOException {
+        char decimalSeparator = (new DecimalFormatSymbols(locale)).getDecimalSeparator();
+        GCEventParser eventParser = new GCEventParser(decimalSeparator);
         Pattern memoryPoolPattern = Pattern.compile("([\\w\\s]+) total (\\d+)K, used (\\d+)K \\[.+");
 
         long totalHeapUsage = 0;
@@ -62,32 +87,40 @@ public class GCLoggingCollector implements DataCollector {
 
         long usageAtPreviousCollection = 0;
         int events = 0;
+        boolean processHeapUsageSummary = false;
 
         while (true) {
             String line = reader.readLine();
-            if (line == null || line.equals("Heap")) {
+            if (line == null) {
+                break;
+            }
+            if (line.equals("Heap")) {
+                processHeapUsageSummary = true;
                 break;
             }
 
-            Matcher matcher = collectionEventPattern.matcher(line);
-            if (!matcher.lookingAt()) {
-                throw new IllegalArgumentException("Unrecognized garbage collection event found in garbage collection log: " + line);
+            GCEventParser.GCEvent event = eventParser.parseLine(line);
+            if (event == GCEventParser.GCEvent.IGNORED) {
+                continue;
             }
+
             events++;
 
-            long start = Long.parseLong(matcher.group(2));
-            long end = Long.parseLong(matcher.group(3));
-            long committed = Long.parseLong(matcher.group(4));
-
-            if (start < usageAtPreviousCollection) {
+            if (event.start < usageAtPreviousCollection) {
                 throw new IllegalArgumentException("Unexpected max heap size found in garbage collection event: " + line);
             }
 
-            totalHeapUsage += start - usageAtPreviousCollection;
-            maxUsage = Math.max(maxUsage, start);
-            maxUncollectedUsage = Math.max(maxUncollectedUsage, end);
-            maxCommittedUsage = Math.max(maxCommittedUsage, committed);
-            usageAtPreviousCollection = end;
+            if (event.timestamp.isAfter(operation.getEnd())) {
+                break;
+            }
+            if (!event.timestamp.isBefore(operation.getStart())) {
+                totalHeapUsage += event.start - usageAtPreviousCollection;
+                maxUsage = Math.max(maxUsage, event.start);
+                maxUncollectedUsage = Math.max(maxUncollectedUsage, event.end);
+                maxCommittedUsage = Math.max(maxCommittedUsage, event.committed);
+            }
+
+            usageAtPreviousCollection = event.end;
         }
 
         if (events == 0) {
@@ -99,39 +132,44 @@ public class GCLoggingCollector implements DataCollector {
         long finalHeapUsage = 0;
         long finalCommittedHeap = 0;
 
-        while (true) {
-            String line = reader.readLine();
-            if (line == null) {
-                break;
+        if (processHeapUsageSummary) {
+            while (true) {
+                String line = reader.readLine();
+                if (line == null) {
+                    break;
+                }
+                Matcher matcher = memoryPoolPattern.matcher(line);
+                if (!matcher.lookingAt()) {
+                    continue;
+                }
+
+                String pool = matcher.group(1).trim();
+                if (pool.toLowerCase().contains("perm gen") || pool.toLowerCase().contains("permgen")) {
+                    //perm gen usage is always the last one to be listed
+                    //by breaking we don't loose the time at the end of the file because of using WaitingReader
+                    break;
+                }
+
+                long committed = Long.parseLong(matcher.group(2));
+                long usage = Long.parseLong(matcher.group(3));
+
+                finalHeapUsage += usage;
+                finalCommittedHeap += committed;
             }
-            Matcher matcher = memoryPoolPattern.matcher(line);
-            if (!matcher.lookingAt()) {
-                continue;
+
+
+            if (finalHeapUsage == 0) {
+                throw new IllegalArgumentException("Did not find any memory pool usage details in garbage collection log.");
             }
 
-            String pool = matcher.group(1).trim();
-            if (pool.toLowerCase().contains("perm gen") || pool.toLowerCase().contains("permgen")) {
-                continue;
+            if (finalHeapUsage < usageAtPreviousCollection) {
+                throw new IllegalArgumentException("Unexpected max heap size found in memory pool usage.");
             }
 
-            long committed = Long.parseLong(matcher.group(2));
-            long usage = Long.parseLong(matcher.group(3));
-
-            finalHeapUsage += usage;
-            finalCommittedHeap += committed;
+            totalHeapUsage += finalHeapUsage - usageAtPreviousCollection;
+            maxUsage = Math.max(maxUsage, finalHeapUsage);
+            maxCommittedUsage = Math.max(maxCommittedUsage, finalCommittedHeap);
         }
-
-        if (finalHeapUsage == 0) {
-            throw new IllegalArgumentException("Did not find any memory pool usage details in garbage collection log.");
-        }
-
-        if (finalHeapUsage < usageAtPreviousCollection) {
-            throw new IllegalArgumentException("Unexpected max heap size found in memory pool usage.");
-        }
-
-        totalHeapUsage += finalHeapUsage - usageAtPreviousCollection;
-        maxUsage = Math.max(maxUsage, finalHeapUsage);
-        maxCommittedUsage = Math.max(maxCommittedUsage, finalCommittedHeap);
 
         operation.setTotalHeapUsage(DataAmount.kbytes(BigDecimal.valueOf(totalHeapUsage)));
         operation.setMaxHeapUsage(DataAmount.kbytes(BigDecimal.valueOf(maxUsage)));

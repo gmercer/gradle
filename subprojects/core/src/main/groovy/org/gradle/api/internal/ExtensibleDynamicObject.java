@@ -22,8 +22,6 @@ import org.gradle.api.plugins.Convention;
 import org.gradle.api.plugins.ExtraPropertiesExtension;
 import org.gradle.internal.reflect.Instantiator;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -59,7 +57,7 @@ public class ExtensibleDynamicObject extends CompositeDynamicObject implements H
     }
 
     public ExtensibleDynamicObject(Object delegate, Instantiator instantiator) {
-        this(delegate, new BeanDynamicObject(delegate), new DefaultConvention(instantiator));
+        this(delegate, createDynamicObject(delegate), new DefaultConvention(instantiator));
     }
 
     public ExtensibleDynamicObject(Object delegate, AbstractDynamicObject dynamicDelegate, Instantiator instantiator) {
@@ -69,32 +67,45 @@ public class ExtensibleDynamicObject extends CompositeDynamicObject implements H
     public ExtensibleDynamicObject(Object delegate, AbstractDynamicObject dynamicDelegate, Convention convention) {
         this.dynamicDelegate = dynamicDelegate;
         this.convention = convention;
-        this.extraPropertiesDynamicObject = new ExtraPropertiesDynamicObjectAdapter(delegate, this, convention.getExtraProperties());
+        this.extraPropertiesDynamicObject = new ExtraPropertiesDynamicObjectAdapter(delegate.getClass(), convention.getExtraProperties());
 
         updateDelegates();
     }
 
+    private static BeanDynamicObject createDynamicObject(Object delegate) {
+        return new BeanDynamicObject(delegate);
+    }
+
     private void updateDelegates() {
-        List<DynamicObject> delegates = new ArrayList<DynamicObject>();
-        delegates.add(dynamicDelegate);
-        delegates.add(extraPropertiesDynamicObject);
+        DynamicObject[] delegates = new DynamicObject[6];
+        delegates[0] = dynamicDelegate;
+        delegates[1] = extraPropertiesDynamicObject;
+        int idx = 2;
         if (beforeConvention != null) {
-            delegates.add(beforeConvention);
+            delegates[idx++] = beforeConvention;
         }
         if (convention != null) {
-            delegates.add(convention.getExtensionsAsDynamicObject());
+            delegates[idx++] = convention.getExtensionsAsDynamicObject();
         }
         if (afterConvention != null) {
-            delegates.add(afterConvention);
+            delegates[idx++] = afterConvention;
         }
+        boolean addedParent = false;
         if (parent != null) {
-            delegates.add(parent);
+            addedParent = true;
+            delegates[idx++] = parent;
         }
-        setObjects(delegates.toArray(new DynamicObject[delegates.size()]));
+        DynamicObject[] objects = new DynamicObject[idx];
+        System.arraycopy(delegates, 0, objects, 0, idx);
+        setObjects(objects);
 
-        delegates.remove(parent);
-        delegates.add(extraPropertiesDynamicObject);
-        setObjectsForUpdate(delegates.toArray(new DynamicObject[delegates.size()]));
+        if (addedParent) {
+            idx--;
+        }
+        delegates[idx++] = extraPropertiesDynamicObject;
+        objects = new DynamicObject[idx];
+        System.arraycopy(delegates, 0, objects, 0, idx);
+        setObjectsForUpdate(objects);
     }
 
     protected String getDisplayName() {

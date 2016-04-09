@@ -19,14 +19,18 @@ import org.gradle.api.internal.specs.ExplainingSpec;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.UncheckedException;
+import org.gradle.internal.remote.internal.ConnectException;
+import org.gradle.internal.remote.internal.OutgoingConnector;
+import org.gradle.internal.remote.internal.RemoteConnection;
+import org.gradle.internal.serialize.Serializers;
 import org.gradle.launcher.daemon.context.DaemonContext;
+import org.gradle.launcher.daemon.context.DaemonInstanceDetails;
 import org.gradle.launcher.daemon.diagnostics.DaemonStartupInfo;
 import org.gradle.launcher.daemon.logging.DaemonMessages;
+import org.gradle.launcher.daemon.protocol.DaemonMessageSerializer;
+import org.gradle.launcher.daemon.protocol.Message;
 import org.gradle.launcher.daemon.registry.DaemonInfo;
 import org.gradle.launcher.daemon.registry.DaemonRegistry;
-import org.gradle.messaging.remote.internal.ConnectException;
-import org.gradle.messaging.remote.internal.Connection;
-import org.gradle.messaging.remote.internal.OutgoingConnector;
 
 import java.util.List;
 
@@ -36,6 +40,7 @@ import java.util.List;
 public class DefaultDaemonConnector implements DaemonConnector {
     private static final Logger LOGGER = Logging.getLogger(DefaultDaemonConnector.class);
     public static final int DEFAULT_CONNECT_TIMEOUT = 30000;
+    public static final String STARTING_DAEMON_MESSAGE = "Starting a new Gradle Daemon for this build (subsequent builds will be faster).";
     private final DaemonRegistry daemonRegistry;
     protected final OutgoingConnector connector;
     private final DaemonStarter daemonStarter;
@@ -63,37 +68,46 @@ public class DefaultDaemonConnector implements DaemonConnector {
         return findConnection(daemonRegistry.getAll(), constraint);
     }
 
+    public DaemonClientConnection maybeConnect(DaemonInstanceDetails daemon) {
+        try {
+            return connectToDaemon(daemon, new CleanupOnStaleAddress(daemon, true));
+        } catch (ConnectException e) {
+            LOGGER.debug("Cannot connect to daemon {} due to {}. Ignoring.", daemon, e);
+            return null;
+        }
+    }
+
     public DaemonClientConnection connect(ExplainingSpec<DaemonContext> constraint) {
         DaemonClientConnection connection = findConnection(daemonRegistry.getIdle(), constraint);
         if (connection != null) {
             return connection;
         }
 
+        LOGGER.lifecycle(STARTING_DAEMON_MESSAGE);
         return startDaemon(constraint);
     }
 
-    private DaemonClientConnection findConnection(List<DaemonInfo> daemonInfos, ExplainingSpec<DaemonContext> constraint) {
-        for (final DaemonInfo daemonInfo : daemonInfos) {
-            if (!constraint.isSatisfiedBy(daemonInfo.getContext())) {
-                LOGGER.debug("Found daemon (address: {}, idle: {}) however its context does not match the desired criteria.\n"
-                        + constraint.whyUnsatisfied(daemonInfo.getContext()) + "\n"
-                        + "  Looking for a different daemon...", daemonInfo.getAddress(), daemonInfo.isIdle());
+    private DaemonClientConnection findConnection(List<DaemonInfo> daemons, ExplainingSpec<DaemonContext> constraint) {
+        for (DaemonInfo daemon : daemons) {
+            if (!constraint.isSatisfiedBy(daemon.getContext())) {
+                LOGGER.debug("Found daemon {} however its context does not match the desired criteria.\n"
+                        + constraint.whyUnsatisfied(daemon.getContext()) + "\n"
+                        + "  Looking for a different daemon...", daemon);
                 continue;
             }
 
             try {
-                return connectToDaemon(daemonInfo, new CleanupOnStaleAddress(daemonInfo, true));
+                return connectToDaemon(daemon, new CleanupOnStaleAddress(daemon, true));
             } catch (ConnectException e) {
-                LOGGER.debug("Cannot connect to the daemon at " + daemonInfo.getAddress() + " due to " + e + ". Trying a different daemon...");
+                LOGGER.debug("Cannot connect to daemon {} due to {}. Trying a different daemon...", daemon, e);
             }
         }
         return null;
     }
 
     public DaemonClientConnection startDaemon(ExplainingSpec<DaemonContext> constraint) {
-        LOGGER.info("Starting Gradle daemon");
         final DaemonStartupInfo startupInfo = daemonStarter.startDaemon();
-        LOGGER.debug("Started Gradle Daemon: {}", startupInfo);
+        LOGGER.debug("Started Gradle daemon {}", startupInfo);
         long expiry = System.currentTimeMillis() + connectTimeout;
         do {
             DaemonClientConnection daemonConnection = connectToDaemonWithId(startupInfo, constraint);
@@ -110,10 +124,10 @@ public class DefaultDaemonConnector implements DaemonConnector {
         throw new DaemonConnectionException("Timeout waiting to connect to the Gradle daemon.\n" + startupInfo.describe());
     }
 
-    private DaemonClientConnection connectToDaemonWithId(DaemonStartupInfo startupInfo, ExplainingSpec<DaemonContext> constraint) throws ConnectException {
+    private DaemonClientConnection connectToDaemonWithId(DaemonStartupInfo daemon, ExplainingSpec<DaemonContext> constraint) throws ConnectException {
         // Look for 'our' daemon among the busy daemons - a daemon will start in busy state so that nobody else will grab it.
         for (DaemonInfo daemonInfo : daemonRegistry.getBusy()) {
-            if (daemonInfo.getContext().getUid().equals(startupInfo.getUid())) {
+            if (daemonInfo.getUid().equals(daemon.getUid())) {
                 try {
                     if (!constraint.isSatisfiedBy(daemonInfo.getContext())) {
                         throw new DaemonConnectionException("The newly created daemon process has a different context than expected."
@@ -122,36 +136,36 @@ public class DefaultDaemonConnector implements DaemonConnector {
                     }
                     return connectToDaemon(daemonInfo, new CleanupOnStaleAddress(daemonInfo, false));
                 } catch (ConnectException e) {
-                    throw new DaemonConnectionException("Could not connect to the Gradle daemon.\n" + startupInfo.describe(), e);
+                    throw new DaemonConnectionException("Could not connect to the Gradle daemon.\n" + daemon.describe(), e);
                 }
             }
         }
         return null;
     }
 
-    private DaemonClientConnection connectToDaemon(DaemonInfo daemonInfo, DaemonClientConnection.StaleAddressDetector staleAddressDetector) throws ConnectException {
-        Connection<Object> connection;
+    private DaemonClientConnection connectToDaemon(DaemonInstanceDetails daemon, DaemonClientConnection.StaleAddressDetector staleAddressDetector) throws ConnectException {
+        RemoteConnection<Message> connection;
         try {
-            connection = connector.connect(daemonInfo.getAddress()).create(getClass().getClassLoader());
+            connection = connector.connect(daemon.getAddress()).create(Serializers.stateful(DaemonMessageSerializer.create()));
         } catch (ConnectException e) {
             staleAddressDetector.maybeStaleAddress(e);
             throw e;
         }
-        return new DaemonClientConnection(connection, daemonInfo.getContext().getUid(), staleAddressDetector);
+        return new DaemonClientConnection(connection, daemon, staleAddressDetector);
     }
 
     private class CleanupOnStaleAddress implements DaemonClientConnection.StaleAddressDetector {
-        private final DaemonInfo daemonInfo;
+        private final DaemonInstanceDetails daemon;
         private final boolean exposeAsStale;
 
-        public CleanupOnStaleAddress(DaemonInfo daemonInfo, boolean exposeAsStale) {
-            this.daemonInfo = daemonInfo;
+        public CleanupOnStaleAddress(DaemonInstanceDetails daemon, boolean exposeAsStale) {
+            this.daemon = daemon;
             this.exposeAsStale = exposeAsStale;
         }
 
         public boolean maybeStaleAddress(Exception failure) {
-            LOGGER.info(DaemonMessages.REMOVING_DAEMON_ADDRESS_ON_FAILURE + daemonInfo);
-            daemonRegistry.remove(daemonInfo.getAddress());
+            LOGGER.info("{}{}", DaemonMessages.REMOVING_DAEMON_ADDRESS_ON_FAILURE, daemon);
+            daemonRegistry.remove(daemon.getAddress());
             return exposeAsStale;
         }
     }

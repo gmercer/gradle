@@ -1,13 +1,19 @@
 // START SNIPPET project-dependencies
 project(":lib") {
     apply plugin: "cpp"
-    nativeLibraries {
-        main {}
-    }
-    // For any shared library binaries built with Visual C++, define the DLL_EXPORT macro
-    binaries.withType(SharedLibraryBinary) {
-        if (toolChain in VisualCpp) {
-            cppCompiler.define "DLL_EXPORT"
+    model {
+        components {
+            main(NativeLibrarySpec)
+        }
+
+        // For any shared library binaries built with Visual C++,
+        // define the DLL_EXPORT macro
+        binaries {
+            withType(SharedLibraryBinarySpec) {
+                if (toolChain in VisualCpp) {
+                    cppCompiler.define "DLL_EXPORT"
+                }
+            }
         }
     }
 }
@@ -15,14 +21,14 @@ project(":lib") {
 project(":exe") {
     apply plugin: "cpp"
 
-    nativeExecutables {
-        main {}
-    }
-
-    sources {
-        main {
-            cpp {
-                lib project: ':lib', library: 'main'
+    model {
+        components {
+            main(NativeExecutableSpec) {
+                sources {
+                    cpp {
+                        lib project: ':lib', library: 'main'
+                    }
+                }
             }
         }
     }

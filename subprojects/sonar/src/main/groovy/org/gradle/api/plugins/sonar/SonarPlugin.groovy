@@ -20,11 +20,13 @@ import org.gradle.api.Project
 import org.gradle.api.internal.project.ProjectInternal
 import org.gradle.api.plugins.JavaBasePlugin
 import org.gradle.api.plugins.JavaPlugin
+import org.gradle.api.plugins.JavaPluginConvention
 import org.gradle.api.plugins.sonar.model.*
 import org.gradle.internal.jvm.Jvm
 import org.gradle.internal.reflect.Instantiator
 import org.gradle.testing.jacoco.plugins.JacocoPlugin
 import org.gradle.util.GradleVersion
+import org.gradle.util.SingleMessageLogger
 
 import javax.inject.Inject
 
@@ -41,7 +43,10 @@ import javax.inject.Inject
  * @see SonarAnalyze
  * @see SonarRootModel
  * @see SonarProjectModel
+ *
+ * @deprecated The 'sonar' plugin has been superseded by the official plugin from SonarQube, please see: http://docs.sonarqube.org/display/SONAR/Analyzing+with+Gradle
  */
+@Deprecated
 class SonarPlugin implements Plugin<ProjectInternal> {
     static final String SONAR_ANALYZE_TASK_NAME = "sonarAnalyze"
 
@@ -53,6 +58,8 @@ class SonarPlugin implements Plugin<ProjectInternal> {
     }
 
     void apply(ProjectInternal project) {
+        SingleMessageLogger.nagUserOfDeprecated("The 'sonar' plugin", "please use the official plugin from SonarQube (http://docs.sonarqube.org/display/SONAR/Analyzing+with+Gradle)")
+
         def task = configureSonarTask(project)
         def model = configureSonarRootModel(project)
         task.rootModel = model
@@ -122,8 +129,8 @@ class SonarPlugin implements Plugin<ProjectInternal> {
 
         project.plugins.withType(JavaBasePlugin) {
             javaSettings.conventionMapping.with {
-                sourceCompatibility = { project.sourceCompatibility.toString() }
-                targetCompatibility = { project.targetCompatibility.toString() }
+                sourceCompatibility = { project.convention.getPlugin(JavaPluginConvention).sourceCompatibility.toString() }
+                targetCompatibility = { project.convention.getPlugin(JavaPluginConvention).targetCompatibility.toString() }
             }
         }
 

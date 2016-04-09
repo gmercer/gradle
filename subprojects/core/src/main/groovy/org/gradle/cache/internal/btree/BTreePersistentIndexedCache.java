@@ -17,9 +17,9 @@ package org.gradle.cache.internal.btree;
 
 import org.gradle.api.UncheckedIOException;
 import org.gradle.cache.PersistentIndexedCache;
-import org.gradle.messaging.serialize.Serializer;
-import org.gradle.messaging.serialize.kryo.KryoBackedDecoder;
-import org.gradle.messaging.serialize.kryo.KryoBackedEncoder;
+import org.gradle.internal.serialize.Serializer;
+import org.gradle.internal.serialize.kryo.KryoBackedDecoder;
+import org.gradle.internal.serialize.kryo.KryoBackedEncoder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,7 +34,6 @@ import java.util.*;
 // todo - don't store null links to child blocks in leaf index blocks
 // todo - align block boundaries
 // todo - thread safety control
-// todo - remove the check-sum from each block
 // todo - merge small values into a single data block
 // todo - discard when file corrupt
 // todo - include data directly in index entry when serializer can guarantee small fixed sized data

@@ -23,8 +23,8 @@ public class ConnectorServicesTest extends Specification {
 
     def "services sharing configuration"() {
         when:
-        def connectorOne = new ConnectorServices().createConnector()
-        def connectorTwo = new ConnectorServices().createConnector()
+        def connectorOne = ConnectorServices.createConnector()
+        def connectorTwo = ConnectorServices.createConnector()
 
         then:
         connectorOne != connectorTwo
@@ -34,5 +34,19 @@ public class ConnectorServicesTest extends Specification {
 
         //tooling impl loader must be shared across connectors, so that we have single DefaultConnection per distro/classpath
         connectorOne.connectionFactory.toolingImplementationLoader == connectorTwo.connectionFactory.toolingImplementationLoader
+    }
+
+    def "services can create GradleConnection.Builder"() {
+        expect:
+        ConnectorServices.createGradleConnectionBuilder()
+    }
+
+    def "can close services"() {
+        when:
+        ConnectorServices.close()
+        ConnectorServices.createConnector()
+
+        then:
+        IllegalStateException e = thrown()
     }
 }

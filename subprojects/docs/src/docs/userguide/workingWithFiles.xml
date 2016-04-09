@@ -29,8 +29,7 @@
         </sample>
         <para>You can pass any object to the <literal>file()</literal> method, and it will attempt to convert the value
             to an absolute <classname>File</classname> object. Usually, you would pass it a
-            <classname>String</classname> or <classname>File</classname> instance. The supplied object's
-            <literal>toString()</literal> value is used as the file path. If this path is an absolute path, it is used
+            <classname>String</classname> or <classname>File</classname> instance. If this path is an absolute path, it is used
             to construct a <classname>File</classname> instance. Otherwise, a <classname>File</classname> instance is
             constructed by prepending the project directory path to the supplied path. The <literal>file()</literal>
             method also understands URLs, such as <literal>file:/some/path.xml</literal>.
@@ -220,7 +219,7 @@
         <sample id="copy" dir="userguide/files/copy" title="Selecting the files to copy">
             <sourcefile file="build.gradle" snippet="copy-task-with-patterns"/>
         </sample>
-        <para>You can also use the <apilink class="org.gradle.api.Project" method="copy"/> method to copy files. It works the
+        <para>You can also use the <apilink class="org.gradle.api.Project" method="copy(org.gradle.api.Action)"/> method to copy files. It works the
             same way as the task with some major limitations though. First, the <literal>copy()</literal> is not incremental
             (see <xref linkend="sec:up_to_date_checks" />).
         </para>
@@ -236,7 +235,7 @@
             <sourcefile file="build.gradle" snippet="copy-method-with-dependency"/>
         </sample>
         <para>
-            It is preferable to use the <literal>Copy</literal> task wherever possible, as it support incremental building and task dependency inference
+            It is preferable to use the <literal>Copy</literal> task wherever possible, as it supports incremental building and task dependency inference
             without any extra effort on your part. The <literal>copy()</literal> method can be used to copy files as <emphasis>part</emphasis> of a task's
             implementation. That is, the copy method is intended to be used by custom tasks (see <xref linkend="custom_tasks" />) that need to copy files
             as part of their function. In such a scenario, the custom task should sufficiently declare the inputs/outputs relevant to the copy action.
@@ -247,11 +246,20 @@
                 <sourcefile file="build.gradle" snippet="rename-files"/>
             </sample>
         </section>
-        <section>
+        <section id="sec:filtering_files">
             <title>Filtering files</title>
             <sample id="filterOnCopy" dir="userguide/files/copy" title="Filtering files as they are copied">
                 <sourcefile file="build.gradle" snippet="filter-files"/>
             </sample>
+            <para>When you use the <literal>ReplaceTokens</literal> class with the “filter” operation, the result is a template engine that replaces tokens of the form “@tokenName@” (the Apache Ant-style token) with a set of given values. The “expand” operation does the same thing except it treats the source files as
+            <ulink url="http://docs.groovy-lang.org/latest/html/api/groovy/text/SimpleTemplateEngine.html">Groovy templates</ulink>
+            in which tokens take the form “${tokenName}”. Be aware that you may need to escape parts of your source files when
+            using this option, for example if it contains literal “$” or “&lt;%” strings.</para>
+
+            <para>It's a good practice to specify the charset when reading and writing the file, using the <literal>filteringCharset</literal>
+                property. If not specified, the JVM default charset is used, which might not match with the actual charset of the files
+                to filter, and might be different from one machine to another.
+            </para>
         </section>
         <section>
             <title>Using the <classname>CopySpec</classname> class</title>
@@ -281,7 +289,7 @@
     <section id="sec:archives">
         <title>Creating archives</title>
         <para>
-            A project can have as many as JAR archives as you want. You can also add WAR, ZIP and TAR archives to your project.
+            A project can have as many JAR archives as you want. You can also add WAR, ZIP and TAR archives to your project.
             Archives are created using the various archive tasks:
             <apilink class="org.gradle.api.tasks.bundling.Zip"/>,
             <apilink class="org.gradle.api.tasks.bundling.Tar"/>,
@@ -312,7 +320,8 @@
         <section>
             <title>Archive naming</title>
 
-            <para>The default name for a generated archive is <filename><replaceable>projectName</replaceable>-<replaceable>version</replaceable>.<replaceable>type</replaceable></filename>
+            <para>The format of <filename><replaceable>projectName</replaceable>-<replaceable>version</replaceable>.<replaceable>type</replaceable></filename>
+            is used for generated archive file names.
                 For example:
             </para>
             <sample id="archiveNaming" dir="userguide/files/archiveNaming" title="Creation of ZIP archive">
@@ -367,8 +376,8 @@
                 <tr>
                     <td><literal>destinationDir</literal></td>
                     <td><classname>File</classname></td>
-                    <td>Depends on the archive type. JARs and WARs are generated into <filename><replaceable>project.buildDir</replaceable>/libraries</filename>.
-                        ZIPs and TARs are generated into <filename><replaceable>project.buildDir</replaceable>/distributions</filename>.
+                    <td>Depends on the archive type. JARs and WARs go into <filename><replaceable>project.buildDir</replaceable>/libraries</filename>.
+                        ZIPs and TARs go into <filename><replaceable>project.buildDir</replaceable>/distributions</filename>.
                     </td>
                     <td>The directory to generate the archive into</td>
                 </tr>
@@ -408,7 +417,7 @@
 
         <section>
             <title>Sharing content between multiple archives</title>
-            <para>You can use the <apilink class="org.gradle.api.Project" method="copySpec"/> method to share content between archives.</para>
+            <para>You can use the <apilink class="org.gradle.api.Project" method="copySpec(org.gradle.api.Action)"/> method to share content between archives.</para>
         </section>
 
         <para>Often you will want to publish an archive, so that it is usable from another project. This process is

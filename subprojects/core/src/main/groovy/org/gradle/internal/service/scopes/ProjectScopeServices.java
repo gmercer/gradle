@@ -26,33 +26,39 @@ import org.gradle.api.internal.artifacts.ModuleInternal;
 import org.gradle.api.internal.artifacts.ProjectBackedModule;
 import org.gradle.api.internal.artifacts.configurations.DependencyMetaDataProvider;
 import org.gradle.api.internal.artifacts.dsl.dependencies.ProjectFinder;
+import org.gradle.api.internal.component.ComponentRegistry;
 import org.gradle.api.internal.component.DefaultSoftwareComponentContainer;
 import org.gradle.api.internal.file.*;
+import org.gradle.api.internal.file.collections.DirectoryFileTreeFactory;
 import org.gradle.api.internal.initialization.DefaultScriptHandlerFactory;
 import org.gradle.api.internal.initialization.ScriptHandlerFactory;
-import org.gradle.api.internal.plugins.DefaultPluginContainer;
-import org.gradle.api.internal.plugins.PluginRegistry;
+import org.gradle.api.internal.plugins.*;
 import org.gradle.api.internal.project.DefaultAntBuilderFactory;
+import org.gradle.api.internal.project.DeferredProjectConfiguration;
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.internal.project.ant.AntLoggingAdapter;
 import org.gradle.api.internal.project.taskfactory.ITaskFactory;
 import org.gradle.api.internal.tasks.DefaultTaskContainerFactory;
 import org.gradle.api.internal.tasks.TaskContainerInternal;
-import org.gradle.api.plugins.PluginContainer;
+import org.gradle.api.tasks.util.PatternSet;
 import org.gradle.configuration.project.DefaultProjectConfigurationActionContainer;
 import org.gradle.configuration.project.ProjectConfigurationActionContainer;
 import org.gradle.initialization.ProjectAccessListener;
 import org.gradle.internal.Factory;
-import org.gradle.internal.nativeplatform.filesystem.FileSystem;
+import org.gradle.internal.file.PathToFileResolver;
+import org.gradle.internal.nativeintegration.filesystem.FileSystem;
 import org.gradle.internal.reflect.Instantiator;
 import org.gradle.internal.service.DefaultServiceRegistry;
 import org.gradle.internal.service.ServiceRegistration;
 import org.gradle.internal.service.ServiceRegistry;
-import org.gradle.logging.LoggingManagerInternal;
-import org.gradle.model.ModelRules;
-import org.gradle.model.internal.DefaultModelRegistry;
-import org.gradle.model.internal.ModelRegistry;
-import org.gradle.model.internal.ModelRegistryBackedModelRules;
+import org.gradle.internal.typeconversion.DefaultTypeConverter;
+import org.gradle.internal.typeconversion.TypeConverter;
+import org.gradle.internal.logging.LoggingManagerInternal;
+import org.gradle.model.internal.inspect.ModelRuleExtractor;
+import org.gradle.model.internal.inspect.ModelRuleSourceDetector;
+import org.gradle.model.internal.registry.DefaultModelRegistry;
+import org.gradle.model.internal.registry.ModelRegistry;
+import org.gradle.process.internal.DefaultExecActionFactory;
 import org.gradle.tooling.provider.model.ToolingModelBuilderRegistry;
 import org.gradle.tooling.provider.model.internal.DefaultToolingModelBuilderRegistry;
 
@@ -79,11 +85,19 @@ public class ProjectScopeServices extends DefaultServiceRegistry {
     }
 
     protected PluginRegistry createPluginRegistry(PluginRegistry parentRegistry) {
-        return parentRegistry.createChild(project.getClassLoaderScope().createChild().lock(), new DependencyInjectingInstantiator(this));
+        return parentRegistry.createChild(project.getClassLoaderScope().createChild("plugins").lock());
     }
 
-    protected FileResolver createFileResolver() {
-        return new BaseDirFileResolver(get(FileSystem.class), project.getProjectDir());
+    protected DeferredProjectConfiguration createDeferredProjectConfiguration() {
+        return new DeferredProjectConfiguration(project);
+    }
+
+    protected FileResolver createFileResolver(Factory<PatternSet> patternSetFactory) {
+        return new BaseDirFileResolver(get(FileSystem.class), project.getProjectDir(), patternSetFactory);
+    }
+
+    protected SourceDirectorySetFactory createSourceDirectorySetFactory(FileResolver fileResolver, DirectoryFileTreeFactory directoryFileTreeFactory) {
+        return new DefaultSourceDirectorySetFactory(fileResolver, directoryFileTreeFactory);
     }
 
     protected LoggingManagerInternal createLoggingManager() {
@@ -94,8 +108,12 @@ public class ProjectScopeServices extends DefaultServiceRegistry {
         return new DefaultProjectConfigurationActionContainer();
     }
 
-    protected DefaultFileOperations createFileOperations() {
-        return new DefaultFileOperations(get(FileResolver.class), project.getTasks(), get(TemporaryFileProvider.class), get(Instantiator.class), get(FileLookup.class));
+    protected DefaultFileOperations createFileOperations(FileResolver fileResolver, TemporaryFileProvider temporaryFileProvider, Instantiator instantiator, FileLookup fileLookup, DirectoryFileTreeFactory directoryFileTreeFactory) {
+        return new DefaultFileOperations(fileResolver, project.getTasks(), temporaryFileProvider, instantiator, fileLookup, directoryFileTreeFactory);
+    }
+
+    protected DefaultExecActionFactory createExecActionFactory(FileResolver fileResolver) {
+        return new DefaultExecActionFactory(fileResolver);
     }
 
     protected TemporaryFileProvider createTemporaryFileProvider() {
@@ -114,8 +132,9 @@ public class ProjectScopeServices extends DefaultServiceRegistry {
         return new DefaultToolingModelBuilderRegistry();
     }
 
-    protected PluginContainer createPluginContainer() {
-        return new DefaultPluginContainer(get(PluginRegistry.class), project);
+    protected PluginManagerInternal createPluginManager(Instantiator instantiator) {
+        PluginApplicator applicator = new RuleBasedPluginApplicator<ProjectInternal>(project, get(ModelRuleExtractor.class), get(ModelRuleSourceDetector.class));
+        return instantiator.newInstance(DefaultPluginManager.class, get(PluginRegistry.class), new DependencyInjectingInstantiator(this), applicator);
     }
 
     protected ITaskFactory createTaskFactory(ITaskFactory parentFactory) {
@@ -123,7 +142,7 @@ public class ProjectScopeServices extends DefaultServiceRegistry {
     }
 
     protected Factory<TaskContainerInternal> createTaskContainerInternal() {
-        return new DefaultTaskContainerFactory(get(Instantiator.class), get(ITaskFactory.class), project, get(ProjectAccessListener.class));
+        return new DefaultTaskContainerFactory(get(ModelRegistry.class), get(Instantiator.class), get(ITaskFactory.class), project, get(ProjectAccessListener.class));
     }
 
     protected SoftwareComponentContainer createSoftwareComponentContainer() {
@@ -139,12 +158,8 @@ public class ProjectScopeServices extends DefaultServiceRegistry {
         };
     }
 
-    protected ModelRegistry createModelRegistry() {
-        return new DefaultModelRegistry();
-    }
-
-    protected ModelRules createModelRules() {
-        return get(Instantiator.class).newInstance(ModelRegistryBackedModelRules.class, get(ModelRegistry.class));
+    protected ModelRegistry createModelRegistry(ModelRuleExtractor ruleExtractor) {
+        return new DefaultModelRegistry(ruleExtractor, project.getPath());
     }
 
     protected ScriptHandler createScriptHandler() {
@@ -156,11 +171,7 @@ public class ProjectScopeServices extends DefaultServiceRegistry {
     }
 
     protected DependencyMetaDataProvider createDependencyMetaDataProvider() {
-        return new DependencyMetaDataProvider() {
-            public ModuleInternal getModule() {
-                return new ProjectBackedModule(project);
-            }
-        };
+        return new ProjectBackedModuleMetaDataProvider();
     }
 
     protected ServiceRegistryFactory createServiceRegistryFactory(final ServiceRegistry services) {
@@ -172,5 +183,19 @@ public class ProjectScopeServices extends DefaultServiceRegistry {
                 throw new UnsupportedOperationException();
             }
         };
+    }
+
+    protected ComponentRegistry createComponentRegistry() {
+        return new ComponentRegistry();
+    }
+
+    protected TypeConverter createTypeConverter(PathToFileResolver fileResolver) {
+        return new DefaultTypeConverter(fileResolver);
+    }
+
+    private class ProjectBackedModuleMetaDataProvider implements DependencyMetaDataProvider {
+        public ModuleInternal getModule() {
+            return new ProjectBackedModule(project);
+        }
     }
 }

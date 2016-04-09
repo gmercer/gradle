@@ -16,22 +16,24 @@
 package org.gradle.api.tasks;
 
 import com.google.common.collect.Lists;
-import org.gradle.api.*;
-import org.gradle.api.artifacts.Configuration;
+import org.gradle.api.Buildable;
+import org.gradle.api.GradleException;
+import org.gradle.api.Incubating;
+import org.gradle.api.Project;
 import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.file.FileCollection;
+import org.gradle.api.internal.file.FileCollectionInternal;
 import org.gradle.api.internal.file.collections.LazilyInitializedFileCollection;
 import org.gradle.api.internal.plugins.GroovyJarFile;
-import org.gradle.api.plugins.GroovyBasePlugin;
+import org.gradle.api.internal.tasks.TaskDependencyResolveContext;
+import org.gradle.internal.Cast;
 
 import java.io.File;
-import java.util.Collections;
 import java.util.List;
-import java.util.Set;
 
 /**
  * Provides information related to the Groovy runtime(s) used in a project. Added by the
- * {@link GroovyBasePlugin} as a project extension named {@code groovyRuntime}.
+ * {@link org.gradle.api.plugins.GroovyBasePlugin} as a project extension named {@code groovyRuntime}.
  *
  * <p>Example usage:
  *
@@ -60,10 +62,9 @@ public class GroovyRuntime {
     }
 
     /**
-     * Searches the specified class path for Groovy Jars ({@code groovy(-indy)}, {@code groovy-all(-indy)})
-     * and returns a corresponding class path for executing Groovy tools such as the Groovy compiler and Groovydoc tool.
-     * The tool versions will match those of the Groovy Jars found. If no Groovy Jars are found on the specified class
-     * path, a class path with the contents of the {@code groovy} configuration will be returned.
+     * Searches the specified class path for Groovy Jars ({@code groovy(-indy)}, {@code groovy-all(-indy)}) and returns a corresponding class path for executing Groovy tools such as the Groovy
+     * compiler and Groovydoc tool. The tool versions will match those of the Groovy Jars found. If no Groovy Jars are found on the specified class path, a class path with the contents of the {@code
+     * groovy} configuration will be returned.
      *
      * <p>The returned class path may be empty, or may fail to resolve when asked for its contents.
      *
@@ -71,14 +72,14 @@ public class GroovyRuntime {
      * @return a corresponding class path for executing Groovy tools such as the Groovy compiler and Groovydoc tool
      */
     public FileCollection inferGroovyClasspath(final Iterable<File> classpath) {
-        final Configuration groovyConfiguration = project.getConfigurations().getByName(GroovyBasePlugin.GROOVY_CONFIGURATION_NAME);
-        if (!groovyConfiguration.getDependencies().isEmpty()) {
-            return groovyConfiguration;
-        }
-
         // alternatively, we could return project.files(Runnable)
         // would differ in at least the following ways: 1. live 2. no autowiring
         return new LazilyInitializedFileCollection() {
+            @Override
+            public String getDisplayName() {
+                return "Groovy runtime classpath";
+            }
+
             @Override
             public FileCollection createDelegate() {
                 GroovyJarFile groovyJar = findGroovyJarFile(classpath);
@@ -87,7 +88,7 @@ public class GroovyRuntime {
                 }
 
                 if (groovyJar.isGroovyAll()) {
-                    return project.files(groovyJar.getFile());
+                    return Cast.cast(FileCollectionInternal.class, project.files(groovyJar.getFile()));
                 }
 
                 if (project.getRepositories().isEmpty()) {
@@ -98,29 +99,32 @@ public class GroovyRuntime {
                 List<Dependency> dependencies = Lists.newArrayList();
                 // project.getDependencies().create(String) seems to be the only feasible way to create a Dependency with a classifier
                 dependencies.add(project.getDependencies().create(notation));
-                return project.getConfigurations().detachedConfiguration(dependencies.toArray(new Dependency[dependencies.size()]));
+                if (groovyJar.getVersion().getMajor() >= 2) {
+                    // add groovy-ant to bring in Groovydoc
+                    dependencies.add(project.getDependencies().create(notation.replace(":groovy:", ":groovy-ant:")));
+                }
+                return project.getConfigurations().detachedConfiguration(dependencies.toArray(new Dependency[0]));
             }
 
             // let's override this so that delegate isn't created at autowiring time (which would mean on every build)
             @Override
-            public TaskDependency getBuildDependencies() {
+            public void visitDependencies(TaskDependencyResolveContext context) {
                 if (classpath instanceof Buildable) {
-                    return ((Buildable) classpath).getBuildDependencies();
+                    context.add(classpath);
                 }
-                return new TaskDependency() {
-                    public Set<? extends Task> getDependencies(Task task) {
-                        return Collections.emptySet();
-                    }
-                };
             }
         };
     }
 
     private GroovyJarFile findGroovyJarFile(Iterable<File> classpath) {
-        if (classpath == null) { return null; }
+        if (classpath == null) {
+            return null;
+        }
         for (File file : classpath) {
             GroovyJarFile groovyJar = GroovyJarFile.parse(file);
-            if (groovyJar != null) { return groovyJar; }
+            if (groovyJar != null) {
+                return groovyJar;
+            }
         }
         return null;
     }

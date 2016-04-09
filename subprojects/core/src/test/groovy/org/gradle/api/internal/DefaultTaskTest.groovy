@@ -17,13 +17,14 @@
 package org.gradle.api.internal
 
 import com.google.common.collect.Lists
+import groovy.transform.CompileStatic
 import org.gradle.api.*
 import org.gradle.api.tasks.AbstractTaskTest
 import org.gradle.api.tasks.TaskDependency
 import org.gradle.api.tasks.TaskExecutionException
 import org.gradle.api.tasks.TaskInstantiationException
 import org.gradle.internal.Actions
-import org.gradle.listener.ListenerManager
+import org.gradle.internal.event.ListenerManager
 import org.gradle.util.WrapUtil
 import org.jmock.Expectations
 import org.junit.After
@@ -85,8 +86,8 @@ class DefaultTaskTest extends AbstractTaskTest {
     public void testDependsOn() {
         Task dependsOnTask = createTask(project, "somename");
         Task task = createTask(project, TEST_TASK_NAME);
-        project.getTasks().add("path1");
-        project.getTasks().add("path2");
+        project.getTasks().create("path1");
+        project.getTasks().create("path2");
 
         task.dependsOn(Project.PATH_SEPARATOR + "path1");
         assertThat(task, dependsOn("path1"));
@@ -255,9 +256,8 @@ class DefaultTaskTest extends AbstractTaskTest {
         def actionExecuted = false
         def closureAction = { t -> actionExecuted = true } as Action
         defaultTask.actions.add(closureAction)
-        defaultTask.execute()
+        execute(defaultTask)
         assertTrue(actionExecuted)
-
     }
 
     @Issue("GRADLE-2774")
@@ -266,7 +266,7 @@ class DefaultTaskTest extends AbstractTaskTest {
         def actionExecuted = false
         def closureAction = { t -> actionExecuted = true } as Action
         defaultTask.actions.addAll(Lists.newArrayList(closureAction))
-        defaultTask.execute()
+        execute(defaultTask)
 
         assertTrue(actionExecuted)
     }
@@ -277,9 +277,8 @@ class DefaultTaskTest extends AbstractTaskTest {
         def actionExecuted = false
         def closureAction = { t -> actionExecuted = true } as Action
         defaultTask.actions.addAll(0, Lists.newArrayList(closureAction))
-        defaultTask.execute()
+        execute(defaultTask)
         assertTrue(actionExecuted)
-
     }
 
     @Issue("GRADLE-2774")
@@ -288,7 +287,7 @@ class DefaultTaskTest extends AbstractTaskTest {
         def actionExecuted = false
         def closureAction = { t -> actionExecuted = true } as Action
         defaultTask.actions.listIterator().add(closureAction)
-        defaultTask.execute()
+        execute(defaultTask)
         assertTrue(actionExecuted)
     }
 
@@ -322,9 +321,10 @@ class DefaultTaskTest extends AbstractTaskTest {
     }
 
     @Test
+    @CompileStatic
     public void testAddAllNullToActionsAndExecute() {
         thrown.expect(InvalidUserDataException.class)
-        defaultTask.actions.addAll(null);
+        defaultTask.actions.addAll((Collection)null);
     }
 
     @Test
@@ -344,17 +344,6 @@ class DefaultTaskTest extends AbstractTaskTest {
         } catch (TaskExecutionException e) {
             assertThat(e.cause, sameInstance(failure))
         }
-
-        assertThat(defaultTask.state.failure, instanceOf(TaskExecutionException))
-        assertThat(defaultTask.state.failure.cause, sameInstance(failure))
-    }
-
-    @Test
-    public void testExecuteWithoutThrowingTaskFailureThrowsExecutionFailure() {
-        def failure = new RuntimeException()
-        defaultTask.doFirst { throw failure }
-
-        defaultTask.executeWithoutThrowingTaskFailure()
 
         assertThat(defaultTask.state.failure, instanceOf(TaskExecutionException))
         assertThat(defaultTask.state.failure.cause, sameInstance(failure))
@@ -420,7 +409,7 @@ class DefaultTaskTest extends AbstractTaskTest {
     }
 
     @Test
-    @Issue("http://issues.gradle.org/browse/GRADLE-2022")
+    @Issue("https://issues.gradle.org/browse/GRADLE-2022")
     public void testGoodErrorMessageWhenTaskInstantiatedDirectly() {
         try {
             new DefaultTask();

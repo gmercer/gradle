@@ -16,7 +16,6 @@
 
 package org.gradle.cache.internal
 
-import org.gradle.CacheUsage
 import org.gradle.api.Action
 import org.gradle.cache.CacheValidator
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
@@ -30,7 +29,7 @@ import static org.gradle.cache.internal.filelock.LockOptionsBuilder.mode
 class DefaultPersistentDirectoryCacheSpec extends Specification {
 
     @Rule TestNameTestDirectoryProvider tmp
-    
+
     def "will rebuild cache if not unlocked cleanly"() {
         given:
         def dir = tmp.createDir("cache")
@@ -38,13 +37,16 @@ class DefaultPersistentDirectoryCacheSpec extends Specification {
         def init = { initd = true } as Action
         unlockUncleanly(new File(dir, "cache.properties"))
         def cache = new DefaultPersistentDirectoryCache(
-                dir, "test", CacheUsage.ON, { true } as CacheValidator, [:], mode(FileLockManager.LockMode.Exclusive), init, createDefaultFileLockManager()
+                dir, "test", { true } as CacheValidator, [:], mode(FileLockManager.LockMode.Exclusive), init, createDefaultFileLockManager()
         )
-        
+
         when:
         cache.open()
 
         then:
         initd
+
+        cleanup:
+        cache.close()
     }
 }

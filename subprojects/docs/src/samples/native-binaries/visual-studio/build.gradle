@@ -53,19 +53,22 @@ model {
 }
 // END SNIPPET customize-solution-files
 
-nativeExecutables {
-    main {}
-}
-nativeLibraries {
-    hello {}
-}
-sources.main.cpp.lib libraries.hello
+model {
+    components {
+        main(NativeExecutableSpec) {
+            sources {
+                cpp.lib library: "hello"
+            }
+        }
+        hello(NativeLibrarySpec)
+    }
 
-// For any shared library binaries built with Visual C++, define the DLL_EXPORT macro
-binaries.withType(SharedLibraryBinary) {
-    if (toolChain in VisualCpp) {
-        cppCompiler.define "DLL_EXPORT"
+    // For any shared library binaries built with Visual C++, define the DLL_EXPORT macro
+    binaries {
+        withType(SharedLibraryBinarySpec) {
+            if (toolChain in VisualCpp) {
+                cppCompiler.define "DLL_EXPORT"
+            }
+        }
     }
 }
-
-

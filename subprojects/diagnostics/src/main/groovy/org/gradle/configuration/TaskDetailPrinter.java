@@ -26,13 +26,16 @@ import org.gradle.api.internal.tasks.options.OptionDescriptor;
 import org.gradle.api.internal.tasks.options.OptionReader;
 import org.gradle.api.specs.Spec;
 import org.gradle.execution.TaskSelector;
-import org.gradle.logging.StyledTextOutput;
-import org.gradle.logging.internal.LinePrefixingStyledTextOutput;
+import org.gradle.internal.logging.StyledTextOutput;
+import org.gradle.internal.logging.internal.LinePrefixingStyledTextOutput;
 
 import java.util.*;
 
-import static org.gradle.logging.StyledTextOutput.Style.UserInput;
-import static org.gradle.util.CollectionUtils.*;
+import static org.gradle.internal.logging.StyledTextOutput.Style.UserInput;
+import static org.gradle.util.CollectionUtils.sort;
+import static org.gradle.util.CollectionUtils.collect;
+import static org.gradle.util.CollectionUtils.filter;
+import static org.apache.commons.collections.CollectionUtils.intersection;
 
 public class TaskDetailPrinter {
     private final String taskPath;
@@ -67,6 +70,7 @@ public class TaskDetailPrinter {
             for (Task task : tasksByType) {
                 pathOutput.withStyle(UserInput).println(task.getPath());
             }
+
             output.println();
             final LinePrefixingStyledTextOutput typeOutput = createIndentedOutput(output, INDENT);
             typeOutput.println("Type");
@@ -77,6 +81,10 @@ public class TaskDetailPrinter {
 
             output.println();
             printTaskDescription(output, tasksByType);
+
+            output.println();
+            printTaskGroup(output, tasksByType);
+
             if (multipleClasses) {
                 output.println();
                 output.println("----------------------");
@@ -117,17 +125,36 @@ public class TaskDetailPrinter {
     }
 
     private void printTaskDescription(StyledTextOutput output, List<Task> tasks) {
-        int differentDescriptionsCount = differentDescriptions(tasks);
-        final LinePrefixingStyledTextOutput descriptorOutput = createIndentedOutput(output, INDENT);
-        descriptorOutput.println(differentDescriptionsCount > 1 ? "Descriptions" : "Description");
-        if (differentDescriptionsCount == 1) {
-            // all tasks have the same description
+        printTaskAttribute(output, "Description", tasks, new Transformer<String, Task>() {
+            public String transform(Task task) {
+                return task.getDescription();
+            }
+        });
+    }
+
+    private void printTaskGroup(StyledTextOutput output, List<Task> tasks) {
+        printTaskAttribute(output, "Group", tasks, new Transformer<String, Task>() {
+            public String transform(Task task) {
+                return task.getGroup();
+            }
+        });
+    }
+
+    private void printTaskAttribute(StyledTextOutput output, String attributeHeader, List<Task> tasks, Transformer<String, Task> transformer) {
+        int count = collect(tasks, new HashSet<String>(), transformer).size();
+        final LinePrefixingStyledTextOutput attributeOutput = createIndentedOutput(output, INDENT);
+        if (count == 1) {
+            // all tasks have the same value
+            attributeOutput.println(attributeHeader);
             final Task task = tasks.iterator().next();
-            descriptorOutput.println(task.getDescription() == null ? "-" : task.getDescription());
+            String value = transformer.transform(task);
+            attributeOutput.println(value == null ? "-" : value);
         } else {
+            attributeOutput.println(attributeHeader + "s");
             for (Task task : tasks) {
-                descriptorOutput.withStyle(UserInput).text(String.format("(%s) ", task.getPath()));
-                descriptorOutput.println(task.getDescription() == null ? "-" : task.getDescription());
+                attributeOutput.withStyle(UserInput).text(String.format("(%s) ", task.getPath()));
+                String value = transformer.transform(task);
+                attributeOutput.println(value == null ? "-" : value);
             }
         }
     }
@@ -141,25 +168,15 @@ public class TaskDetailPrinter {
             output.println();
             output.text("Options").println();
         }
-        final ListMultimap<String, OptionDescriptor> optionsByName = groupDescriptorsByName(allOptions);
-        Iterator<String> optionNames = sort(optionsByName.asMap().keySet()).iterator();
+        Map<String, Set<String>> optionToAvailableOptionsValues = optionToAvailableValues(allOptions);
+        Map<String, String> optionToDescription = optionToDescription(allOptions);
+        Iterator<String> optionNames = optionToAvailableOptionsValues.keySet().iterator();
         while (optionNames.hasNext()) {
-            final String currentOption = optionNames.next();
-            final List<OptionDescriptor> descriptorsForCurrentName = optionsByName.get(currentOption);
-
-            final String optionString = String.format("--%s", currentOption);
+            String currentOption = optionNames.next();
+            Set<String> availableValues = optionToAvailableOptionsValues.get(currentOption);
+            String optionString = String.format("--%s", currentOption);
             output.text(INDENT).withStyle(UserInput).text(optionString);
-
-            List<List<String>> availableValuesByDescriptor = collect(descriptorsForCurrentName, new Transformer<List<String>, OptionDescriptor>() {
-                public List<String> transform(OptionDescriptor original) {
-                    return original.getAvailableValues();
-                }
-            });
-
-            List<String> commonAvailableValues = intersection(availableValuesByDescriptor);
-            Set<String> availableValues = new TreeSet<String>(commonAvailableValues);
-            //description does not differ between task objects, grab first one
-            output.text(INDENT).text(descriptorsForCurrentName.iterator().next().getDescription());
+            output.text(INDENT).text(optionToDescription.get(currentOption));
             if (!availableValues.isEmpty()) {
                 final int optionDescriptionOffset = 2 * INDENT.length() + optionString.length();
                 final LinePrefixingStyledTextOutput prefixedOutput = createIndentedOutput(output, optionDescriptionOffset);
@@ -178,12 +195,26 @@ public class TaskDetailPrinter {
         }
     }
 
-    private ListMultimap<String, OptionDescriptor> groupDescriptorsByName(List<OptionDescriptor> allOptions) {
-        ListMultimap<String, OptionDescriptor> optionsGroupedByName = ArrayListMultimap.create();
-        for (final OptionDescriptor option : allOptions) {
-            optionsGroupedByName.put(option.getName(), option);
+    @SuppressWarnings("unchecked")
+    private Map<String, Set<String>> optionToAvailableValues(List<OptionDescriptor> allOptions) {
+        Map<String, Set<String>> result = new LinkedHashMap<String, Set<String>>();
+        for (OptionDescriptor optionDescriptor : allOptions) {
+            if (result.containsKey(optionDescriptor.getName())) {
+                Collection<String> commonValues = intersection(optionDescriptor.getAvailableValues(), result.get(optionDescriptor.getName()));
+                result.put(optionDescriptor.getName(), new TreeSet<String>(commonValues));
+            } else {
+                result.put(optionDescriptor.getName(), optionDescriptor.getAvailableValues());
+            }
         }
-        return optionsGroupedByName;
+        return result;
+    }
+
+    private Map<String, String> optionToDescription(List<OptionDescriptor> allOptions) {
+        Map<String, String> result = new HashMap<String, String>();
+        for (OptionDescriptor optionDescriptor : allOptions) {
+            result.put(optionDescriptor.getName(), optionDescriptor.getDescription());
+        }
+        return result;
     }
 
     private LinePrefixingStyledTextOutput createIndentedOutput(StyledTextOutput output, int offset) {
@@ -191,16 +222,6 @@ public class TaskDetailPrinter {
     }
 
     private LinePrefixingStyledTextOutput createIndentedOutput(StyledTextOutput output, String prefix) {
-        return new LinePrefixingStyledTextOutput(output, prefix);
-    }
-
-    private int differentDescriptions(List<Task> tasks) {
-        return toSet(
-                collect(tasks, new Transformer<String, Task>() {
-                    public String transform(Task original) {
-                        return original.getDescription();
-                    }
-                })
-        ).size();
+        return new LinePrefixingStyledTextOutput(output, prefix, false);
     }
 }

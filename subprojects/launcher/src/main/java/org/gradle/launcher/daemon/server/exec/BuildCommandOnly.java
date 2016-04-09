@@ -17,13 +17,15 @@ package org.gradle.launcher.daemon.server.exec;
 
 import org.gradle.launcher.daemon.protocol.Build;
 import org.gradle.launcher.daemon.protocol.Command;
+import org.gradle.launcher.daemon.server.api.DaemonCommandAction;
+import org.gradle.launcher.daemon.server.api.DaemonCommandExecution;
 
 /**
  * Superclass template for actions that only work for Build.
  * 
  * If an action of this type receives a command that is not Build it will throw an exception.
  */
-abstract public class BuildCommandOnly implements DaemonCommandAction {
+public abstract class BuildCommandOnly implements DaemonCommandAction {
 
     public void execute(DaemonCommandExecution execution) {
         Command command = execution.getCommand();

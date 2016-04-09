@@ -18,16 +18,19 @@ package org.gradle.internal.service.scopes
 
 import org.gradle.api.AntBuilder
 import org.gradle.api.RecordingAntBuildListener
+import org.gradle.api.artifacts.ConfigurationContainer
 import org.gradle.api.initialization.dsl.ScriptHandler
-import org.gradle.api.internal.*
+import org.gradle.api.internal.ClassGenerator
+import org.gradle.api.internal.ClassGeneratorBackedInstantiator
+import org.gradle.api.internal.GradleInternal
+import org.gradle.api.internal.TaskInternal
 import org.gradle.api.internal.artifacts.DependencyManagementServices
 import org.gradle.api.internal.artifacts.DependencyResolutionServices
-import org.gradle.api.internal.artifacts.configurations.ConfigurationContainerInternal
 import org.gradle.api.internal.artifacts.dsl.dependencies.DependencyFactory
 import org.gradle.api.internal.file.*
+import org.gradle.api.internal.file.collections.DirectoryFileTreeFactory
 import org.gradle.api.internal.initialization.ClassLoaderScope
 import org.gradle.api.internal.initialization.DefaultScriptHandler
-import org.gradle.api.internal.plugins.DefaultPluginContainer
 import org.gradle.api.internal.plugins.PluginRegistry
 import org.gradle.api.internal.project.DefaultAntBuilderFactory
 import org.gradle.api.internal.project.ProjectInternal
@@ -35,18 +38,20 @@ import org.gradle.api.internal.project.taskfactory.ITaskFactory
 import org.gradle.api.internal.tasks.DefaultTaskContainerFactory
 import org.gradle.api.internal.tasks.TaskContainerInternal
 import org.gradle.api.logging.LoggingManager
-import org.gradle.api.plugins.PluginContainer
 import org.gradle.configuration.project.DefaultProjectConfigurationActionContainer
 import org.gradle.configuration.project.ProjectConfigurationActionContainer
 import org.gradle.groovy.scripts.ScriptSource
 import org.gradle.initialization.ProjectAccessListener
 import org.gradle.internal.Factory
-import org.gradle.internal.nativeplatform.filesystem.FileSystem
+import org.gradle.internal.nativeintegration.filesystem.FileSystem
 import org.gradle.internal.reflect.DirectInstantiator
 import org.gradle.internal.reflect.Instantiator
 import org.gradle.internal.service.ServiceRegistration
 import org.gradle.internal.service.ServiceRegistry
-import org.gradle.logging.LoggingManagerInternal
+import org.gradle.internal.logging.LoggingManagerInternal
+import org.gradle.model.internal.inspect.ModelRuleExtractor
+import org.gradle.model.internal.inspect.ModelRuleSourceDetector
+import org.gradle.model.internal.registry.ModelRegistry
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.tooling.provider.model.ToolingModelBuilderRegistry
 import org.gradle.tooling.provider.model.internal.DefaultToolingModelBuilderRegistry
@@ -55,14 +60,18 @@ import spock.lang.Specification
 
 class ProjectScopeServicesTest extends Specification {
     ProjectInternal project = Mock()
-    ConfigurationContainerInternal configurationContainer = Mock()
+    ConfigurationContainer configurationContainer = Mock()
     GradleInternal gradle = Mock()
     DependencyManagementServices dependencyManagementServices = Mock()
     ITaskFactory taskFactory = Mock()
     DependencyFactory dependencyFactory = Mock()
     ServiceRegistry parent = Stub()
     ProjectScopeServices registry
-    PluginRegistry pluginRegistry = Mock()
+    PluginRegistry pluginRegistry = Mock() {
+        createChild(_) >> Mock(PluginRegistry)
+    }
+    ModelRegistry modelRegistry = Mock()
+    ModelRuleSourceDetector modelRuleSourceDetector = Mock()
     def classLoaderScope = Mock(ClassLoaderScope)
     DependencyResolutionServices dependencyResolutionServices = Stub()
 
@@ -74,17 +83,20 @@ class ProjectScopeServicesTest extends Specification {
         project.projectDir >> testDirectoryProvider.file("project-dir").createDir().absoluteFile
         project.buildScriptSource >> Stub(ScriptSource)
         project.getClassLoaderScope() >> classLoaderScope
-        project.getClassLoaderScope().createChild() >> classLoaderScope
+        project.getClassLoaderScope().createChild(_) >> classLoaderScope
         project.getClassLoaderScope().lock() >> classLoaderScope
         parent.get(ITaskFactory) >> taskFactory
         parent.get(DependencyFactory) >> dependencyFactory
         parent.get(PluginRegistry) >> pluginRegistry
         parent.get(DependencyManagementServices) >> dependencyManagementServices
-        parent.get(Instantiator) >> new DirectInstantiator()
+        parent.get(Instantiator) >> DirectInstantiator.INSTANCE
         parent.get(FileSystem) >> Stub(FileSystem)
         parent.get(ClassGenerator) >> Stub(ClassGenerator)
         parent.get(ProjectAccessListener) >> Stub(ProjectAccessListener)
         parent.get(FileLookup) >> Stub(FileLookup)
+        parent.get(DirectoryFileTreeFactory) >> Stub(DirectoryFileTreeFactory)
+        parent.get(ModelRuleSourceDetector) >> modelRuleSourceDetector
+        parent.get(ModelRuleExtractor) >> Stub(ModelRuleExtractor)
         registry = new ProjectScopeServices(parent, project)
     }
 
@@ -113,13 +125,6 @@ class ProjectScopeServicesTest extends Specification {
 
         expect:
         registry.getFactory(TaskContainerInternal) instanceof DefaultTaskContainerFactory
-    }
-
-    def "provides a PluginContainer"() {
-        1 * pluginRegistry.createChild(classLoaderScope, _ as DependencyInjectingInstantiator) >> Stub(PluginRegistry)
-
-        expect:
-        provides(PluginContainer, DefaultPluginContainer)
     }
 
     def "provides a ToolingModelBuilderRegistry"() {
@@ -214,6 +219,6 @@ class ProjectScopeServicesTest extends Specification {
     private void expectScriptClassLoaderProviderCreated() {
         1 * dependencyManagementServices.create(!null, !null, !null, !null) >> dependencyResolutionServices
         // return mock rather than stub; workaround for fact that Spock doesn't substitute generic method return type as it should
-        dependencyResolutionServices.configurationContainer >> Mock(ConfigurationContainerInternal)
+        dependencyResolutionServices.configurationContainer >> Mock(ConfigurationContainer)
     }
 }

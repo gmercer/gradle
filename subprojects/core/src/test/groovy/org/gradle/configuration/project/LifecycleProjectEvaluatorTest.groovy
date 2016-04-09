@@ -26,8 +26,8 @@ public class LifecycleProjectEvaluatorTest extends Specification {
     private project = Mock(ProjectInternal)
     private listener = Mock(ProjectEvaluationListener)
     private delegate = Mock(ProjectEvaluator)
-    private state = Mock(ProjectStateInternal)
     private evaluator = new LifecycleProjectEvaluator(delegate)
+    private state = Mock(ProjectStateInternal)
 
     void setup() {
         project.getProjectEvaluationBroadcaster() >> listener
@@ -86,6 +86,9 @@ public class LifecycleProjectEvaluatorTest extends Specification {
         })
         1 * state.setExecuting(false)
         1 * listener.afterEvaluate(project, state)
+
+        and:
+        _ * state.hasFailure() >> true
     }
 
     void "updates state and does not delegate when beforeEvaluate action fails"() {
@@ -121,6 +124,9 @@ public class LifecycleProjectEvaluatorTest extends Specification {
         1 * state.executed({
             assertIsConfigurationFailure(it, failure)
         })
+
+        and:
+        state.hasFailure() >>> [false, true]
     }
 
     def assertIsConfigurationFailure(def it, def cause) {
@@ -146,7 +152,8 @@ public class LifecycleProjectEvaluatorTest extends Specification {
 
         then:
         1 * listener.afterEvaluate(project, state) >> { throw new RuntimeException("afterEvaluate") }
-        1 * state.hasFailure() >> true
+        _ * state.hasFailure() >> true
         0 * state.executed(_)
     }
+
 }

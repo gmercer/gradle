@@ -15,23 +15,13 @@
  */
 package org.gradle.launcher.daemon.client;
 
-import org.gradle.api.internal.DocumentationRegistry;
-import org.gradle.cache.internal.DefaultFileLockManager;
-import org.gradle.cache.internal.DefaultProcessMetaDataProvider;
-import org.gradle.cache.internal.FileLockManager;
-import org.gradle.cache.internal.locklistener.DefaultFileLockContentionHandler;
-import org.gradle.cache.internal.locklistener.FileLockContentionHandler;
-import org.gradle.internal.concurrent.DefaultExecutorFactory;
-import org.gradle.internal.concurrent.ExecutorFactory;
-import org.gradle.internal.nativeplatform.ProcessEnvironment;
+import org.gradle.internal.event.ListenerManager;
 import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.launcher.daemon.bootstrap.DaemonGreeter;
 import org.gradle.launcher.daemon.configuration.DaemonParameters;
 import org.gradle.launcher.daemon.context.DaemonContextBuilder;
 import org.gradle.launcher.daemon.registry.DaemonDir;
 import org.gradle.launcher.daemon.registry.DaemonRegistryServices;
-import org.gradle.messaging.remote.internal.MessagingServices;
-import org.gradle.messaging.remote.internal.inet.InetAddressFactory;
 
 import java.io.InputStream;
 
@@ -41,41 +31,14 @@ import java.io.InputStream;
 public class DaemonClientServices extends DaemonClientServicesSupport {
     private final DaemonParameters daemonParameters;
 
-    public DaemonClientServices(ServiceRegistry loggingServices, DaemonParameters daemonParameters, InputStream buildStandardInput) {
-        super(loggingServices, buildStandardInput);
+    public DaemonClientServices(ServiceRegistry parent, DaemonParameters daemonParameters, InputStream buildStandardInput) {
+        super(parent, buildStandardInput);
         this.daemonParameters = daemonParameters;
         addProvider(new DaemonRegistryServices(daemonParameters.getBaseDir()));
     }
 
-    protected FileLockManager createFileLockManager(ProcessEnvironment processEnvironment, FileLockContentionHandler fileLockContentionHandler) {
-        return new DefaultFileLockManager(new DefaultProcessMetaDataProvider(processEnvironment), fileLockContentionHandler);
-    }
-
-    protected MessagingServices createMessagingServices() {
-        return new MessagingServices(getClass().getClassLoader());
-    }
-
-    protected FileLockContentionHandler createFileLockContentionHandler(ExecutorFactory executorFactory, MessagingServices messagingServices) {
-        return new DefaultFileLockContentionHandler(
-                executorFactory,
-                messagingServices.get(InetAddressFactory.class)
-        );
-    }
-
-    protected ExecutorFactory createExecutorFactory() {
-        return new DefaultExecutorFactory();
-    }
-
-    protected DocumentationRegistry createDocumentationRegistry() {
-        return new DocumentationRegistry();
-    }
-
-    public DaemonStarter createDaemonStarter() {
-        return new DefaultDaemonStarter(get(DaemonDir.class), daemonParameters, get(DaemonGreeter.class));
-    }
-
-    protected DaemonGreeter createDaemonGreeter() {
-        return new DaemonGreeter(get(DocumentationRegistry.class));
+    DaemonStarter createDaemonStarter(DaemonDir daemonDir, DaemonParameters daemonParameters, ListenerManager listenerManager, DaemonGreeter daemonGreeter, JvmVersionValidator jvmVersionValidator) {
+        return new DefaultDaemonStarter(daemonDir, daemonParameters, daemonGreeter, listenerManager.getBroadcaster(DaemonStartListener.class), jvmVersionValidator);
     }
 
     protected void configureDaemonContextBuilder(DaemonContextBuilder builder) {
@@ -83,7 +46,7 @@ public class DaemonClientServices extends DaemonClientServicesSupport {
         builder.useDaemonParameters(daemonParameters);
     }
 
-    public DaemonParameters getDaemonParameters() {
+    DaemonParameters createDaemonParameters() {
         return daemonParameters;
     }
 }

@@ -15,7 +15,7 @@
  */
 package org.gradle.api.internal.project.taskfactory;
 
-import org.apache.commons.lang.StringUtils;
+import com.google.common.collect.Maps;
 import org.gradle.api.*;
 import org.gradle.api.internal.AbstractTask;
 import org.gradle.api.internal.ConventionTask;
@@ -33,6 +33,7 @@ import org.gradle.internal.reflect.Instantiator;
 import org.gradle.internal.reflect.JavaReflectionUtil;
 import org.gradle.util.DeprecationLogger;
 
+import java.beans.Introspector;
 import java.io.File;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.AnnotatedElement;
@@ -49,31 +50,32 @@ public class AnnotationProcessingTaskFactory implements ITaskFactory {
     private final ITaskFactory taskFactory;
     private final Map<Class, TaskClassInfo> classInfos;
 
-    private final Transformer<Iterable<File>, Object> filePropertyTransformer = new Transformer<Iterable<File>, Object>() {
+    private final static Transformer<Iterable<File>, Object> FILE_PROPERTY_TRANSFORMER = new Transformer<Iterable<File>, Object>() {
         public Iterable<File> transform(Object original) {
             File file = (File) original;
             return file == null ? Collections.<File>emptyList() : Collections.singleton(file);
         }
     };
 
-    private final Transformer<Iterable<File>, Object> iterableFilePropertyTransformer = new Transformer<Iterable<File>, Object>() {
+    private final static Transformer<Iterable<File>, Object> ITERABLE_FILE_PROPERTY_TRANSFORMER = new Transformer<Iterable<File>, Object>() {
         @SuppressWarnings("unchecked")
         public Iterable<File> transform(Object original) {
             return original != null ? (Iterable<File>) original : Collections.<File>emptyList();
         }
     };
 
-    private final List<? extends PropertyAnnotationHandler> handlers = Arrays.asList(
+    private final static List<? extends PropertyAnnotationHandler> HANDLERS = Arrays.asList(
             new InputFilePropertyAnnotationHandler(),
             new InputDirectoryPropertyAnnotationHandler(),
             new InputFilesPropertyAnnotationHandler(),
-            new OutputFilePropertyAnnotationHandler(OutputFile.class, filePropertyTransformer),
-            new OutputFilePropertyAnnotationHandler(OutputFiles.class, iterableFilePropertyTransformer),
-            new OutputDirectoryPropertyAnnotationHandler(OutputDirectory.class, filePropertyTransformer),
-            new OutputDirectoryPropertyAnnotationHandler(OutputDirectories.class, iterableFilePropertyTransformer),
+            new OutputFilePropertyAnnotationHandler(OutputFile.class, FILE_PROPERTY_TRANSFORMER),
+            new OutputFilePropertyAnnotationHandler(OutputFiles.class, ITERABLE_FILE_PROPERTY_TRANSFORMER),
+            new OutputDirectoryPropertyAnnotationHandler(OutputDirectory.class, FILE_PROPERTY_TRANSFORMER),
+            new OutputDirectoryPropertyAnnotationHandler(OutputDirectories.class, ITERABLE_FILE_PROPERTY_TRANSFORMER),
             new InputPropertyAnnotationHandler(),
             new NestedBeanPropertyAnnotationHandler());
-    private final ValidationAction notNullValidator = new ValidationAction() {
+
+    private final static ValidationAction NOT_NULL_VALIDATOR = new ValidationAction() {
         public void validate(String propertyName, Object value, Collection<String> messages) {
             if (value == null) {
                 messages.add(String.format("No value has been specified for property '%s'.", propertyName));
@@ -96,11 +98,19 @@ public class AnnotationProcessingTaskFactory implements ITaskFactory {
     }
 
     public TaskInternal createTask(Map<String, ?> args) {
-        TaskInternal task = taskFactory.createTask(args);
+        return process(taskFactory.createTask(args));
+    }
+
+    @Override
+    public <S extends TaskInternal> S create(String name, Class<S> type) {
+        return process(taskFactory.create(name, type));
+    }
+
+    private <S extends TaskInternal> S process(S task) {
         TaskClassInfo taskClassInfo = getTaskClassInfo(task.getClass());
 
         if (taskClassInfo.incremental) {
-            // Add a dummy upToDateWhen spec: this will for TaskOutputs.hasOutputs() to be true.
+            // Add a dummy upToDateWhen spec: this will force TaskOutputs.hasOutputs() to be true.
             task.getOutputs().upToDateWhen(new Spec<Task>() {
                 public boolean isSatisfiedBy(Task element) {
                     return true;
@@ -109,11 +119,11 @@ public class AnnotationProcessingTaskFactory implements ITaskFactory {
         }
 
         for (Factory<Action<Task>> actionFactory : taskClassInfo.taskActions) {
-            task.doFirst(actionFactory.create());
+            task.prependParallelSafeAction(actionFactory.create());
         }
 
         if (taskClassInfo.validator != null) {
-            task.doFirst(taskClassInfo.validator);
+            task.prependParallelSafeAction(taskClassInfo.validator);
             taskClassInfo.validator.addInputsAndOutputs(task);
         }
 
@@ -243,7 +253,7 @@ public class AnnotationProcessingTaskFactory implements ITaskFactory {
         public boolean incremental;
     }
 
-    private class Validator implements Action<Task>, TaskValidator {
+    private static class Validator implements Action<Task>, TaskValidator {
         private Set<PropertyInfo> properties = new LinkedHashSet<PropertyInfo>();
 
         public void addInputsAndOutputs(final TaskInternal task) {
@@ -285,21 +295,24 @@ public class AnnotationProcessingTaskFactory implements ITaskFactory {
                 attachActions(parent, superclass);
             }
 
+            Map<String, Field> fields = getFields(type);
             for (Method method : type.getDeclaredMethods()) {
-                if (!isGetter(method)) {
+                if (!isGetter(method) || method.isBridge()) {
                     continue;
                 }
 
                 String name = method.getName();
                 int prefixLength = name.startsWith("is") ? 2 : 3; // it's 'get' if not 'is'.
-                String fieldName = StringUtils.uncapitalize(name.substring(prefixLength));
+                String fieldName = Introspector.decapitalize(name.substring(prefixLength));
                 String propertyName = fieldName;
                 if (parent != null) {
                     propertyName = parent.getName() + '.' + propertyName;
                 }
-                PropertyInfo propertyInfo = new PropertyInfo(type, this, parent, propertyName, method);
+                Field field = fields.get(fieldName);
 
-                attachValidationActions(propertyInfo, fieldName);
+                PropertyInfo propertyInfo = new PropertyInfo(this, parent, propertyName, method, field);
+
+                attachValidationActions(propertyInfo, fieldName, field);
 
                 if (propertyInfo.required) {
                     properties.add(propertyInfo);
@@ -307,28 +320,29 @@ public class AnnotationProcessingTaskFactory implements ITaskFactory {
             }
         }
 
-        private void attachValidationActions(PropertyInfo propertyInfo, String fieldName) {
-            for (PropertyAnnotationHandler handler : handlers) {
-                attachValidationAction(handler, propertyInfo, fieldName);
+        private Map<String, Field> getFields(Class<?> type) {
+            Map<String, Field> fields = Maps.newHashMap();
+            for (Field field : type.getDeclaredFields()) {
+                fields.put(field.getName(), field);
+            }
+            return fields;
+        }
+
+        private void attachValidationActions(PropertyInfo propertyInfo, String fieldName, Field field) {
+            final Method method = propertyInfo.method;
+            for (PropertyAnnotationHandler handler : HANDLERS) {
+                attachValidationAction(handler, propertyInfo, fieldName, method, field);
             }
         }
 
-        private void attachValidationAction(PropertyAnnotationHandler handler, PropertyInfo propertyInfo, String fieldName) {
-            final Method method = propertyInfo.method;
+        private void attachValidationAction(PropertyAnnotationHandler handler, PropertyInfo propertyInfo, String fieldName, Method method, Field field) {
             Class<? extends Annotation> annotationType = handler.getAnnotationType();
 
             AnnotatedElement annotationTarget = null;
             if (method.getAnnotation(annotationType) != null) {
                 annotationTarget = method;
-            } else {
-                try {
-                    Field field = method.getDeclaringClass().getDeclaredField(fieldName);
-                    if (field.getAnnotation(annotationType) != null) {
-                        annotationTarget = field;
-                    }
-                } catch (NoSuchFieldException e) {
-                    // ok - ignore
-                }
+            } else if (field != null && field.getAnnotation(annotationType) != null) {
+                annotationTarget = field;
             }
             if (annotationTarget == null) {
                 return;
@@ -336,7 +350,7 @@ public class AnnotationProcessingTaskFactory implements ITaskFactory {
 
             Annotation optional = annotationTarget.getAnnotation(org.gradle.api.tasks.Optional.class);
             if (optional == null) {
-                propertyInfo.setNotNullValidator(notNullValidator);
+                propertyInfo.setNotNullValidator(NOT_NULL_VALIDATOR);
             }
 
             propertyInfo.attachActions(handler);
@@ -368,7 +382,7 @@ public class AnnotationProcessingTaskFactory implements ITaskFactory {
             }
         };
         private static final UpdateAction NO_OP_CONFIGURATION_ACTION = new UpdateAction() {
-            public void update(Task task, Callable<Object> futureValue) {
+            public void update(TaskInternal task, Callable<Object> futureValue) {
             }
         };
 
@@ -380,14 +394,14 @@ public class AnnotationProcessingTaskFactory implements ITaskFactory {
         private ValidationAction notNullValidator = NO_OP_VALIDATION_ACTION;
         private UpdateAction configureAction = NO_OP_CONFIGURATION_ACTION;
         public boolean required;
-        private final Class<?> type;
+        private final Field instanceVariableField;
 
-        private PropertyInfo(Class<?> type, Validator validator, PropertyInfo parent, String propertyName, Method method) {
-            this.type = type;
+        private PropertyInfo(Validator validator, PropertyInfo parent, String propertyName, Method method, Field instanceVariableField) {
             this.validator = validator;
             this.parent = parent;
             this.propertyName = propertyName;
             this.method = method;
+            this.instanceVariableField = instanceVariableField;
         }
 
         @Override
@@ -404,16 +418,7 @@ public class AnnotationProcessingTaskFactory implements ITaskFactory {
         }
 
         public Class<?> getInstanceVariableType() {
-            Class<?> currentType = type;
-            while (!currentType.equals(Object.class)) {
-                try {
-                    return currentType.getDeclaredField(propertyName).getType();
-                } catch (NoSuchFieldException e) {
-                    currentType = currentType.getSuperclass();
-                }
-            }
-
-            return null;
+            return instanceVariableField != null ? instanceVariableField.getType() : null;
         }
 
         public AnnotatedElement getTarget() {

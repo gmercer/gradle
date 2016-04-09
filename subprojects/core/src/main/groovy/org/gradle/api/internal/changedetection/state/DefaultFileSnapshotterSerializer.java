@@ -16,30 +16,36 @@
 
 package org.gradle.api.internal.changedetection.state;
 
-import org.gradle.messaging.serialize.Decoder;
-import org.gradle.messaging.serialize.Encoder;
-import org.gradle.messaging.serialize.Serializer;
+import org.gradle.api.internal.cache.StringInterner;
+import org.gradle.internal.serialize.Decoder;
+import org.gradle.internal.serialize.Encoder;
+import org.gradle.internal.serialize.HashValueSerializer;
+import org.gradle.internal.serialize.Serializer;
 
 import java.util.HashMap;
 import java.util.Map;
 
-class DefaultFileSnapshotterSerializer implements Serializer<DefaultFileCollectionSnapshotter.FileCollectionSnapshotImpl> {
-    public DefaultFileCollectionSnapshotter.FileCollectionSnapshotImpl read(Decoder decoder) throws Exception {
-        Map<String, DefaultFileCollectionSnapshotter.FileSnapshot> snapshots = new HashMap<String, DefaultFileCollectionSnapshotter.FileSnapshot>();
-        DefaultFileCollectionSnapshotter.FileCollectionSnapshotImpl snapshot = new DefaultFileCollectionSnapshotter.FileCollectionSnapshotImpl(snapshots);
+class DefaultFileSnapshotterSerializer implements Serializer<FileCollectionSnapshotImpl> {
+    private final HashValueSerializer hashValueSerializer = new HashValueSerializer();
+    private final StringInterner stringInterner;
+
+    public DefaultFileSnapshotterSerializer(StringInterner stringInterner) {
+        this.stringInterner = stringInterner;
+    }
+
+    public FileCollectionSnapshotImpl read(Decoder decoder) throws Exception {
+        Map<String, IncrementalFileSnapshot> snapshots = new HashMap<String, IncrementalFileSnapshot>();
+        FileCollectionSnapshotImpl snapshot = new FileCollectionSnapshotImpl(snapshots);
         int snapshotsCount = decoder.readSmallInt();
         for (int i = 0; i < snapshotsCount; i++) {
-            String key = decoder.readString();
+            String key = stringInterner.intern(decoder.readString());
             byte fileSnapshotKind = decoder.readByte();
             if (fileSnapshotKind == 1) {
-                snapshots.put(key, new DefaultFileCollectionSnapshotter.DirSnapshot());
+                snapshots.put(key, DirSnapshot.getInstance());
             } else if (fileSnapshotKind == 2) {
-                snapshots.put(key, new DefaultFileCollectionSnapshotter.MissingFileSnapshot());
+                snapshots.put(key, MissingFileSnapshot.getInstance());
             } else if (fileSnapshotKind == 3) {
-                byte hashSize = decoder.readByte();
-                byte[] hash = new byte[hashSize];
-                decoder.readBytes(hash);
-                snapshots.put(key, new DefaultFileCollectionSnapshotter.FileHashSnapshot(hash));
+                snapshots.put(key, new FileHashSnapshot(hashValueSerializer.read(decoder)));
             } else {
                 throw new RuntimeException("Unable to read serialized file collection snapshot. Unrecognized value found in the data stream.");
             }
@@ -47,20 +53,18 @@ class DefaultFileSnapshotterSerializer implements Serializer<DefaultFileCollecti
         return snapshot;
     }
 
-    public void write(Encoder encoder, DefaultFileCollectionSnapshotter.FileCollectionSnapshotImpl value) throws Exception {
+    public void write(Encoder encoder, FileCollectionSnapshotImpl value) throws Exception {
         encoder.writeSmallInt(value.snapshots.size());
         for (String key : value.snapshots.keySet()) {
             encoder.writeString(key);
-            DefaultFileCollectionSnapshotter.FileSnapshot fileSnapshot = value.snapshots.get(key);
-            if (fileSnapshot instanceof DefaultFileCollectionSnapshotter.DirSnapshot) {
+            IncrementalFileSnapshot incrementalFileSnapshot = value.snapshots.get(key);
+            if (incrementalFileSnapshot instanceof DirSnapshot) {
                 encoder.writeByte((byte) 1);
-            } else if (fileSnapshot instanceof DefaultFileCollectionSnapshotter.MissingFileSnapshot) {
+            } else if (incrementalFileSnapshot instanceof MissingFileSnapshot) {
                 encoder.writeByte((byte) 2);
-            } else if (fileSnapshot instanceof DefaultFileCollectionSnapshotter.FileHashSnapshot) {
+            } else if (incrementalFileSnapshot instanceof FileHashSnapshot) {
                 encoder.writeByte((byte) 3);
-                byte[] hash = ((DefaultFileCollectionSnapshotter.FileHashSnapshot) fileSnapshot).hash;
-                encoder.writeByte((byte) hash.length);
-                encoder.writeBytes(hash);
+                hashValueSerializer.write(encoder, ((FileHashSnapshot) incrementalFileSnapshot).hash);
             }
         }
     }

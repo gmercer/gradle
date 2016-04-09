@@ -16,16 +16,19 @@
 
 package org.gradle.plugins.ide.idea.model
 
+import org.gradle.api.Incubating
+import org.gradle.api.JavaVersion
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.dsl.ConventionProperty
 import org.gradle.plugins.ide.idea.model.internal.IdeaDependenciesProvider
+import org.gradle.plugins.ide.internal.resolver.UnresolvedDependenciesLogger
 import org.gradle.util.ConfigureUtil
 
 /**
- * Enables fine-tuning module details (*.iml file) of the IDEA plugin .
+ * Enables fine-tuning module details (*.iml file) of the IDEA plugin.
  * <p>
- * Example of use with a blend of all possible properties.
- * Typically you don't have configure this model directly because Gradle configures it for you.
+ * Example of use with a blend of most possible properties.
+ * Typically you don't have to configure this model directly because Gradle configures it for you.
  *
  * <pre autoTested=''>
  * apply plugin: 'java'
@@ -53,6 +56,9 @@ import org.gradle.util.ConfigureUtil
  *     //and some extra test source dirs
  *     testSourceDirs += file('some-extra-test-dir')
  *
+ *     //and hint to mark some of existing source dirs as generated sources
+ *     generatedSourceDirs += file('some-extra-source-folder')
+ *
  *     //and some extra dirs that should be excluded by IDEA
  *     excludeDirs += file('some-extra-exclude-dir')
  *
@@ -64,11 +70,11 @@ import org.gradle.util.ConfigureUtil
  *     outputDir = file('muchBetterOutputDir')
  *     testOutputDir = file('muchBetterTestOutputDir')
  *
- *     //if you prefer different SDK than that inherited from IDEA project
+ *     //if you prefer different SDK than the one inherited from IDEA project
  *     jdkName = '1.6'
  *
  *     //if you need to put 'provided' dependencies on the classpath
- *     scopes.PROVIDED.plus += configurations.provided
+ *     scopes.PROVIDED.plus += [ configurations.provided ]
  *
  *     //if 'content root' (as IDEA calls it) of the module is different
  *     contentRoot = file('my-module-content-root')
@@ -82,11 +88,11 @@ import org.gradle.util.ConfigureUtil
  * }
  * </pre>
  *
- * For tackling edge cases users can perform advanced configuration on resulting XML file.
+ * For tackling edge cases, users can perform advanced configuration on the resulting XML file.
  * It is also possible to affect the way the IDEA plugin merges the existing configuration
  * via beforeMerged and whenMerged closures.
  * <p>
- * beforeMerged and whenMerged closures receive {@link Module} object
+ * beforeMerged and whenMerged closures receive a {@link Module} parameter
  * <p>
  * Examples of advanced configuration:
  *
@@ -127,7 +133,7 @@ import org.gradle.util.ConfigureUtil
  */
 class IdeaModule {
 
-   /**
+    /**
      * Configures module name, that is the name of the *.iml file.
      * <p>
      * It's <b>optional</b> because the task should configure it correctly for you.
@@ -159,6 +165,14 @@ class IdeaModule {
     Set<File> sourceDirs
 
     /**
+     * The directories containing the generated sources (both production and test sources).
+     * <p>
+     * For example see docs for {@link IdeaModule}
+     */
+    @Incubating
+    Set<File> generatedSourceDirs = []
+
+    /**
      * The keys of this map are the IDEA scopes. Each key points to another map that has two keys, plus and minus.
      * The values of those keys are collections of {@link org.gradle.api.artifacts.Configuration} objects. The files of the
      * plus configurations are added minus the files from the minus configurations. See example below...
@@ -179,7 +193,7 @@ class IdeaModule {
      *
      * idea {
      *   module {
-     *     scopes.PROVIDED.plus += configurations.provided
+     *     scopes.PROVIDED.plus += [ configurations.provided ]
      *   }
      * }
      * </pre>
@@ -261,7 +275,25 @@ class IdeaModule {
     String jdkName
 
     /**
-     * See {@link #iml(Closure) }
+     * The module specific language Level to use for this module. When {@code null}, the module will inherit the
+     * language level from the idea project.
+     * <p>
+     * The Idea module language level is based on the {@code sourceCompatibility} settings for the associated Gradle project.
+     */
+    @Incubating
+    IdeaLanguageLevel languageLevel
+
+    /**
+     * The module specific bytecode version to use for this module. When {@code null}, the module will inherit the
+     * bytecode version from the idea project.
+     * <p>
+     * The Idea module bytecode version is based on the {@code targetCompatibility} settings for the associated Gradle project.
+     */
+    @Incubating
+    JavaVersion targetBytecodeVersion
+
+    /**
+     * See {@link #iml(Closure)}
      */
     final IdeaModuleIml iml
 
@@ -287,7 +319,7 @@ class IdeaModule {
     }
 
     void setOutputFile(File newOutputFile) {
-        setName(newOutputFile.name.replaceFirst(/\.iml$/,""))
+        setName(newOutputFile.name.replaceFirst(/\.iml$/, ""))
         iml.generateTo = newOutputFile.parentFile
     }
 
@@ -297,7 +329,9 @@ class IdeaModule {
      * @return dependencies
      */
     Set<Dependency> resolveDependencies() {
-        return new IdeaDependenciesProvider().provide(this)
+        def ideaDependenciesProvider = new IdeaDependenciesProvider()
+        new UnresolvedDependenciesLogger().log(ideaDependenciesProvider.getUnresolvedDependencies(this))
+        return ideaDependenciesProvider.provide(this)
     }
 
     /**
@@ -326,17 +360,18 @@ class IdeaModule {
     void mergeXmlModule(Module xmlModule) {
         iml.beforeMerged.execute(xmlModule)
 
-        def path = { getPathFactory().path(it) }
-        def contentRoot = path(getContentRoot())
-        Set sourceFolders = getSourceDirs().findAll { it.exists() }.collect { path(it) }
-        Set testSourceFolders = getTestSourceDirs().findAll { it.exists() }.collect { path(it) }
-        Set excludeFolders = getExcludeDirs().collect { path(it) }
-        def outputDir = getOutputDir() ? path(getOutputDir()) : null
-        def testOutputDir = getTestOutputDir() ? path(getTestOutputDir()) : null
-        Set dependencies = resolveDependencies()
+        def path = { File f -> getPathFactory().path(f) }
+        Path contentRoot = path(getContentRoot())
+        Set<Path> sourceFolders = getSourceDirs().findAll { it.exists() }.collect { path(it) }
+        Set<Path> generatedSourceFolders = getGeneratedSourceDirs().findAll { it.exists() }.collect { path(it) }
+        Set<Path> testSourceFolders = getTestSourceDirs().findAll { it.exists() }.collect { path(it) }
+        Set<Path> excludeFolders = getExcludeDirs().collect { path(it) }
+        Path outputDir = getOutputDir() ? path(getOutputDir()) : null
+        Path testOutputDir = getTestOutputDir() ? path(getTestOutputDir()) : null
+        Set<Dependency> dependencies = resolveDependencies()
 
-        xmlModule.configure(contentRoot, sourceFolders, testSourceFolders, excludeFolders,
-                getInheritOutputDirs(), outputDir, testOutputDir, dependencies, getJdkName())
+        xmlModule.configure(contentRoot, sourceFolders, testSourceFolders, generatedSourceFolders, excludeFolders,
+            getInheritOutputDirs(), outputDir, testOutputDir, dependencies, getJdkName(), getLanguageLevel()?.level)
 
         iml.whenMerged.execute(xmlModule)
     }

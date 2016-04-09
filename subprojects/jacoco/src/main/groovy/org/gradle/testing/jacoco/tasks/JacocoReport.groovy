@@ -18,6 +18,7 @@ package org.gradle.testing.jacoco.tasks
 import org.gradle.api.Incubating
 import org.gradle.api.Task
 import org.gradle.api.file.FileCollection
+import org.gradle.api.internal.project.IsolatedAntBuilder
 import org.gradle.api.reporting.Reporting
 import org.gradle.api.tasks.*
 import org.gradle.internal.jacoco.JacocoReportsContainerImpl
@@ -68,37 +69,44 @@ class JacocoReport extends JacocoBase implements Reporting<JacocoReportsContaine
 
     JacocoReport() {
         reports = instantiator.newInstance(JacocoReportsContainerImpl, this)
-        onlyIf { getExecutionData().every { it.exists() } }
+        onlyIf { getExecutionData().every { it.exists() } } //TODO SF it should be 'any' instead of 'every'
     }
 
     @Inject
-    Instantiator getInstantiator() {
+    protected Instantiator getInstantiator() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Inject
+    protected IsolatedAntBuilder getAntBuilder() {
         throw new UnsupportedOperationException();
     }
 
     @TaskAction
     void generate() {
-        getAnt().taskdef(name: 'jacocoReport', classname: 'org.jacoco.ant.ReportTask', classpath: getJacocoClasspath().asPath)
-        getAnt().jacocoReport {
-            executiondata {
-                getExecutionData().addToAntBuilder(getAnt(), 'resources')
-            }
-            structure(name: getProject().getName()) {
-                classfiles {
-                    getAllClassDirs().filter { it.exists() }.addToAntBuilder(getAnt(), 'resources')
+        antBuilder.withClasspath(getJacocoClasspath()).execute {
+            ant.taskdef(name: 'jacocoReport', classname: 'org.jacoco.ant.ReportTask')
+            ant.jacocoReport {
+                executiondata {
+                    getExecutionData().addToAntBuilder(ant, 'resources')
                 }
-                sourcefiles {
-                    getAllSourceDirs().filter { it.exists() }.addToAntBuilder(getAnt(), 'resources')
+                structure(name: getProject().getName()) {
+                    classfiles {
+                        getAllClassDirs().filter { it.exists() }.addToAntBuilder(ant, 'resources')
+                    }
+                    sourcefiles {
+                        getAllSourceDirs().filter { it.exists() }.addToAntBuilder(ant, 'resources')
+                    }
                 }
-            }
-            if(reports.html.isEnabled()) {
-                html(destdir: reports.html.destination)
-            }
-            if(reports.xml.isEnabled()) {
-                xml(destfile: reports.xml.destination)
-            }
-            if(reports.csv.isEnabled()) {
-                csv(destfile: reports.csv.destination)
+                if(reports.html.isEnabled()) {
+                    html(destdir: reports.html.destination)
+                }
+                if(reports.xml.isEnabled()) {
+                    xml(destfile: reports.xml.destination)
+                }
+                if(reports.csv.isEnabled()) {
+                    csv(destfile: reports.csv.destination)
+                }
             }
         }
     }

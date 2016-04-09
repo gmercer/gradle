@@ -1,33 +1,50 @@
 // START SNIPPET complete-example
 apply plugin: "c"
-apply plugin: "cunit"
+apply plugin: 'cunit-test-suite'
 
 model {
     flavors {
         passing
         failing
     }
+    platforms {
+        x86 {
+            architecture "x86"
+        }
+    }
     repositories {
         libs(PrebuiltLibraries) {
             cunit {
-                headers.srcDir "lib/cunit/2.1-2/include"
+                headers.srcDir "libs/cunit/2.1-2/include"
                 binaries.withType(StaticLibraryBinary) {
-                    staticLibraryFile = file("lib/cunit/2.1-2/lib/" + findCUnitLibForPlatform(targetPlatform))
+                    staticLibraryFile =
+                        file("libs/cunit/2.1-2/lib/" +
+                             findCUnitLibForPlatform(targetPlatform))
                 }
             }
         }
     }
-}
-
-nativeLibraries {
-    operators {}
+    components {
+        operators(NativeLibrarySpec) {
+            targetPlatform "x86"
+        }
+    }
+    testSuites {
+        operatorsTest(CUnitTestSuiteSpec) {
+            testing $.components.operators
+        }
+    }
 }
 // START SNIPPET configure-test-binary
-binaries.withType(NativeTestSuiteBinary) {
-    lib library: "cunit", linkage: "static"
+model {
+    binaries {
+        withType(CUnitTestSuiteBinarySpec) {
+            lib library: "cunit", linkage: "static"
 
-    if (flavor == flavors.failing) {
-        cCompiler.define "PLUS_BROKEN"
+            if (flavor == flavors.failing) {
+                cCompiler.define "PLUS_BROKEN"
+            }
+        }
     }
 }
 // END SNIPPET configure-test-binary
@@ -35,8 +52,8 @@ binaries.withType(NativeTestSuiteBinary) {
 
 def findCUnitLibForPlatform(Platform platform) {
     if (platform.operatingSystem.windows) {
-        return "vs2010/cunit.lib"
-//        return "vs2013/cunit.lib"
+//        return "vs2010/cunit.lib"
+        return "vs2013/cunit.lib"
 //        return "cygwin/cunit.lib"
 //        return "mingw/cunit.lib"
     } else if (platform.operatingSystem.macOsX) {

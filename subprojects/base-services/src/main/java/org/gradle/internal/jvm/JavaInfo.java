@@ -17,7 +17,6 @@
 package org.gradle.internal.jvm;
 
 import java.io.File;
-import java.util.Map;
 
 public interface JavaInfo {
     /**
@@ -25,6 +24,12 @@ public interface JavaInfo {
      * @throws JavaHomeException when executable cannot be found
      */
     File getJavaExecutable() throws JavaHomeException;
+
+    /**
+     * @return the executable
+     * @throws JavaHomeException when executable cannot be found
+     */
+    File getJavacExecutable() throws JavaHomeException;
 
     /**
      * @return the executable
@@ -56,6 +61,4 @@ public interface JavaInfo {
      * with custom jre location or if jdk is not installed.
      */
     File getToolsJar();
-
-    Map<String, ?> getInheritableEnvironmentVariables(Map<String, ?> envVars);
 }

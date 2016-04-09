@@ -19,19 +19,14 @@ package org.gradle.api.publish.maven.internal.artifact;
 import org.apache.commons.lang.StringUtils;
 import org.gradle.api.artifacts.PublishArtifact;
 import org.gradle.api.internal.file.FileResolver;
-import org.gradle.internal.typeconversion.NotationParserBuilder;
-import org.gradle.internal.typeconversion.NotationParser;
-import org.gradle.internal.typeconversion.UnsupportedNotationException;
-import org.gradle.internal.typeconversion.MapKey;
-import org.gradle.internal.typeconversion.MapNotationParser;
-import org.gradle.internal.typeconversion.TypedNotationParser;
 import org.gradle.api.publish.maven.MavenArtifact;
 import org.gradle.api.tasks.bundling.AbstractArchiveTask;
 import org.gradle.internal.Factory;
+import org.gradle.internal.exceptions.DiagnosticsVisitor;
 import org.gradle.internal.reflect.Instantiator;
+import org.gradle.internal.typeconversion.*;
 
 import java.io.File;
-import java.util.Collection;
 
 public class MavenArtifactNotationParserFactory implements Factory<NotationParser<Object, MavenArtifact>> {
     private final Instantiator instantiator;
@@ -43,69 +38,69 @@ public class MavenArtifactNotationParserFactory implements Factory<NotationParse
     }
 
     public NotationParser<Object, MavenArtifact> create() {
-        FileNotationParser fileNotationParser = new FileNotationParser(fileResolver);
-        ArchiveTaskNotationParser archiveTaskNotationParser = new ArchiveTaskNotationParser();
-        PublishArtifactNotationParser publishArtifactNotationParser = new PublishArtifactNotationParser();
+        FileNotationConverter fileNotationConverter = new FileNotationConverter(fileResolver);
+        ArchiveTaskNotationConverter archiveTaskNotationConverter = new ArchiveTaskNotationConverter();
+        PublishArtifactNotationConverter publishArtifactNotationConverter = new PublishArtifactNotationConverter();
 
-        NotationParser<Object, MavenArtifact> sourceNotationParser = new NotationParserBuilder<MavenArtifact>()
-                .resultingType(MavenArtifact.class)
-                .parser(archiveTaskNotationParser)
-                .parser(publishArtifactNotationParser)
-                .parser(fileNotationParser)
+        NotationParser<Object, MavenArtifact> sourceNotationParser = NotationParserBuilder
+                .toType(MavenArtifact.class)
+                .fromType(AbstractArchiveTask.class, archiveTaskNotationConverter)
+                .fromType(PublishArtifact.class, publishArtifactNotationConverter)
+                .converter(fileNotationConverter)
                 .toComposite();
 
-        MavenArtifactMapNotationParser mavenArtifactMapNotationParser = new MavenArtifactMapNotationParser(sourceNotationParser);
+        MavenArtifactMapNotationConverter mavenArtifactMapNotationConverter = new MavenArtifactMapNotationConverter(sourceNotationParser);
 
-        NotationParserBuilder<MavenArtifact> parserBuilder = new NotationParserBuilder<MavenArtifact>()
-                .resultingType(MavenArtifact.class)
-                .parser(archiveTaskNotationParser)
-                .parser(publishArtifactNotationParser)
-                .parser(mavenArtifactMapNotationParser)
-                .parser(fileNotationParser);
+        NotationParserBuilder<MavenArtifact> parserBuilder = NotationParserBuilder
+                .toType(MavenArtifact.class)
+                .fromType(AbstractArchiveTask.class, archiveTaskNotationConverter)
+                .fromType(PublishArtifact.class, publishArtifactNotationConverter)
+                .converter(mavenArtifactMapNotationConverter)
+                .converter(fileNotationConverter);
 
         return parserBuilder.toComposite();
     }
 
-    private class ArchiveTaskNotationParser extends TypedNotationParser<AbstractArchiveTask, MavenArtifact> {
-        private ArchiveTaskNotationParser() {
-            super(AbstractArchiveTask.class);
-        }
-
-        @Override
-        protected MavenArtifact parseType(AbstractArchiveTask archiveTask) {
+    private class ArchiveTaskNotationConverter implements NotationConverter<AbstractArchiveTask, MavenArtifact> {
+        public void convert(AbstractArchiveTask archiveTask, NotationConvertResult<? super MavenArtifact> result) throws TypeConversionException {
             DefaultMavenArtifact artifact = instantiator.newInstance(
                     DefaultMavenArtifact.class,
                     archiveTask.getArchivePath(), archiveTask.getExtension(), archiveTask.getClassifier());
             artifact.builtBy(archiveTask);
-            return artifact;
-        }
-    }
-
-    private class PublishArtifactNotationParser extends TypedNotationParser<PublishArtifact, MavenArtifact> {
-        private PublishArtifactNotationParser() {
-            super(PublishArtifact.class);
+            result.converted(artifact);
         }
 
         @Override
-        protected MavenArtifact parseType(PublishArtifact publishArtifact) {
+        public void describe(DiagnosticsVisitor visitor) {
+            visitor.candidate("Instances of AbstractArchiveTask").example("jar");
+        }
+    }
+
+    private class PublishArtifactNotationConverter implements NotationConverter<PublishArtifact, MavenArtifact> {
+        public void convert(PublishArtifact publishArtifact, NotationConvertResult<? super MavenArtifact> result) throws TypeConversionException {
             DefaultMavenArtifact artifact = instantiator.newInstance(
                     DefaultMavenArtifact.class,
                     publishArtifact.getFile(), publishArtifact.getExtension(), publishArtifact.getClassifier());
             artifact.builtBy(publishArtifact.getBuildDependencies());
-            return artifact;
+            result.converted(artifact);
+        }
+
+        @Override
+        public void describe(DiagnosticsVisitor visitor) {
+            visitor.candidate("Instances of PublishArtifact");
         }
     }
 
-    private class FileNotationParser implements NotationParser<Object, MavenArtifact> {
+    private class FileNotationConverter implements NotationConverter<Object, MavenArtifact> {
         private final NotationParser<Object, File> fileResolverNotationParser;
 
-        private FileNotationParser(FileResolver fileResolver) {
+        private FileNotationConverter(FileResolver fileResolver) {
             this.fileResolverNotationParser = fileResolver.asNotationParser();
         }
 
-        public MavenArtifact parseNotation(Object notation) throws UnsupportedNotationException {
+        public void convert(Object notation, NotationConvertResult<? super MavenArtifact> result) throws TypeConversionException {
             File file = fileResolverNotationParser.parseNotation(notation);
-            return parseFile(file);
+            result.converted(parseFile(file));
         }
 
         protected MavenArtifact parseFile(File file) {
@@ -113,15 +108,16 @@ public class MavenArtifactNotationParserFactory implements Factory<NotationParse
             return instantiator.newInstance(DefaultMavenArtifact.class, file, extension, null);
         }
 
-        public void describe(Collection<String> candidateFormats) {
-            fileResolverNotationParser.describe(candidateFormats);
+        @Override
+        public void describe(DiagnosticsVisitor visitor) {
+            fileResolverNotationParser.describe(visitor);
         }
     }
 
-    private class MavenArtifactMapNotationParser extends MapNotationParser<MavenArtifact> {
+    private class MavenArtifactMapNotationConverter extends MapNotationConverter<MavenArtifact> {
         private final NotationParser<Object, MavenArtifact> sourceNotationParser;
 
-        private MavenArtifactMapNotationParser(NotationParser<Object, MavenArtifact> sourceNotationParser) {
+        private MavenArtifactMapNotationConverter(NotationParser<Object, MavenArtifact> sourceNotationParser) {
             this.sourceNotationParser = sourceNotationParser;
         }
 
@@ -130,8 +126,8 @@ public class MavenArtifactNotationParserFactory implements Factory<NotationParse
         }
 
         @Override
-        public void describe(Collection<String> candidateFormats) {
-            candidateFormats.add("Maps containing a 'source' entry, e.g. [source: '/path/to/file', extension: 'zip'].");
+        public void describe(DiagnosticsVisitor visitor) {
+            visitor.candidate("Maps containing a 'source' entry").example("[source: '/path/to/file', extension: 'zip']");
         }
     }
 }

@@ -14,23 +14,28 @@
  * limitations under the License.
  */
 package org.gradle.api.plugins.quality
-
 import org.gradle.api.GradleException
+import org.gradle.api.Incubating
+import org.gradle.api.InvalidUserDataException
 import org.gradle.api.file.FileCollection
 import org.gradle.api.internal.project.IsolatedAntBuilder
 import org.gradle.api.plugins.quality.internal.PmdReportsImpl
 import org.gradle.api.reporting.Reporting
+import org.gradle.api.resources.TextResource
 import org.gradle.api.tasks.*
+import org.gradle.internal.nativeintegration.console.ConsoleDetector
+import org.gradle.internal.nativeintegration.console.ConsoleMetaData
+import org.gradle.internal.nativeintegration.services.NativeServices
 import org.gradle.internal.reflect.Instantiator
-import org.gradle.logging.ConsoleRenderer
+import org.gradle.internal.logging.ConsoleRenderer
 
 import javax.inject.Inject
-
 /**
  * Runs a set of static code analysis rules on Java source code files and
  * generates a report of problems found.
  *
  * @see PmdPlugin
+ * @see PmdExtension
  */
 class Pmd extends SourceTask implements VerificationTask, Reporting<PmdReports> {
     /**
@@ -54,6 +59,23 @@ class Pmd extends SourceTask implements VerificationTask, Reporting<PmdReports> 
     TargetJdk targetJdk
 
     /**
+     * The custom rule set to be used (if any). Replaces {@code ruleSetFiles}, except that
+     * it does not currently support multiple rule sets.
+     *
+     * See the
+     * <a href="http://pmd.sourceforge.net/howtomakearuleset.html">official documentation</a>
+     * for how to author a rule set.
+     *
+     * Example: ruleSetConfig = resources.text.fromFile(resources.file("config/pmd/myRuleSets.xml"))
+     *
+     * @since 2.2
+     */
+    @Incubating
+    @Nested
+    @Optional
+    TextResource ruleSetConfig
+
+    /**
      * The custom rule set files to be used. See the <a href="http://pmd.sourceforge.net/howtomakearuleset.html">official documentation</a> for
      * how to author a rule set file.
      *
@@ -71,6 +93,41 @@ class Pmd extends SourceTask implements VerificationTask, Reporting<PmdReports> 
      * Example: ignoreFailures = true
      */
     boolean ignoreFailures
+
+    /**
+     * Specifies the rule priority threshold.
+     *
+	 * @see PmdExtension#rulePriority
+	 */
+    @Incubating
+	int rulePriority
+
+    /**
+     * Sets the rule priority threshold.
+     */
+    @Incubating
+    void setRulePriority(int intValue) {
+        validate(intValue)
+        rulePriority = intValue
+    }
+
+    /**
+     * Whether or not to write PMD results to {@code System.out}.
+     */
+    @Incubating
+    boolean consoleOutput
+
+    /**
+     * Compile class path for the classes to be analyzed.
+     *
+     * The classes on this class path are used during analysis but aren't analyzed themselves.
+     *
+     * This is only well supported for PMD 5.2.1 or better.
+     */
+    @InputFiles
+    @Optional
+    @Incubating
+    FileCollection classpath
 
     Pmd() {
         reports = instantiator.newInstance(PmdReportsImpl, this)
@@ -97,32 +154,51 @@ class Pmd extends SourceTask implements VerificationTask, Reporting<PmdReports> 
             // http://sourceforge.net/p/pmd/bugs/1004/
             // http://java-pmd.30631.n5.nabble.com/pmd-pmd-db05bc-pmd-AntTask-support-for-language-td5710041.html
             antPmdArgs["targetjdk"] = getTargetJdk().getName()
-        } else {
-            // allow PmdPlugin to set a version-independent default
-            if (getRuleSets() == ["basic"]) {
-                setRuleSets(["java-basic"])
+
+            // fallback to basic on pre 5.0 for backwards compatible
+            if (getRuleSets() == ["java-basic"]) {
+                setRuleSets(["basic"])
             }
         }
 
-        antBuilder.withClasspath(getPmdClasspath()).execute {
-            ant.taskdef(name: 'pmd', classname: 'net.sourceforge.pmd.ant.PMDTask')
-                ant.pmd(antPmdArgs) {
-                    getSource().addToAntBuilder(ant, 'fileset', FileCollection.AntType.FileSet)
-                    getRuleSets().each {
-                        ruleset(it)
-                    }
-                    getRuleSetFiles().each {
-                        ruleset(it)
-                    }
+        antPmdArgs["minimumPriority"] = getRulePriority()
 
-                    if (reports.html.enabled) {
-                        assert reports.html.destination.parentFile.exists()
-                        formatter(type: prePmd5 ? "betterhtml" : "html", toFile: reports.html.destination)
-                    }
-                    if (reports.xml.enabled) {
-                        formatter(type: 'xml', toFile: reports.xml.destination)
-                    }
+        antBuilder.withClasspath(getPmdClasspath()).execute { a ->
+            ant.taskdef(name: 'pmd', classname: 'net.sourceforge.pmd.ant.PMDTask')
+            ant.pmd(antPmdArgs) {
+                getSource().addToAntBuilder(ant, 'fileset', FileCollection.AntType.FileSet)
+                getRuleSets().each {
+                    ruleset(it)
                 }
+                getRuleSetFiles().each {
+                    ruleset(it)
+                }
+                def ruleSetConfig = getRuleSetConfig()
+                if (ruleSetConfig != null) {
+                    ruleset(ruleSetConfig.asFile())
+                }
+
+                if (getClasspath() != null) {
+                    getClasspath().addToAntBuilder(ant, 'auxclasspath', FileCollection.AntType.ResourceCollection)
+                }
+
+                if (reports.html.enabled) {
+                    assert reports.html.destination.parentFile.exists()
+                    formatter(type: prePmd5 ? "betterhtml" : "html", toFile: reports.html.destination)
+                }
+                if (reports.xml.enabled) {
+                    formatter(type: 'xml', toFile: reports.xml.destination)
+                }
+
+                if (getConsoleOutput()) {
+                    def consoleOutputType = 'text'
+                    if (stdOutIsAttachedToTerminal()) {
+                        consoleOutputType = 'textcolor'
+                    }
+                    a.builder.saveStreams = false
+                    formatter(type: consoleOutputType, toConsole: true)
+                }
+            }
             def failureCount = ant.project.properties["pmdFailureCount"]
             if (failureCount) {
                 def message = "$failureCount PMD rule violations were found."
@@ -140,6 +216,12 @@ class Pmd extends SourceTask implements VerificationTask, Reporting<PmdReports> 
         }
     }
 
+    boolean stdOutIsAttachedToTerminal() {
+        ConsoleDetector consoleDetector = NativeServices.getInstance().get(ConsoleDetector.class)
+        ConsoleMetaData consoleMetaData = consoleDetector.getConsole()
+        consoleMetaData?.stdOut
+    }
+
     /**
      * Configures the reports to be generated by this task.
      */
@@ -152,5 +234,15 @@ class Pmd extends SourceTask implements VerificationTask, Reporting<PmdReports> 
      */
     PmdReports getReports() {
         reports
+    }
+
+    /**
+     * Validates the value is a valid PMD RulePriority (1-5)
+     * @param value rule priority threshold
+     */
+    static void validate(int value) {
+        if (value > 5 || value < 1) {
+            throw new InvalidUserDataException(String.format("Invalid rulePriority '%d'.  Valid range 1 (highest) to 5 (lowest).", value));
+        }
     }
 }

@@ -50,7 +50,7 @@ public class Clock {
     }
 
     public long getTimeInMs() {
-        return timeProvider.getCurrentTime() - start;
+        return Math.max(timeProvider.getCurrentTime() - start, 0);
     }
 
     public void reset() {
@@ -62,7 +62,7 @@ public class Clock {
     }
 
     public static String prettyTime(long timeInMs) {
-        StringBuffer result = new StringBuffer();
+        StringBuilder result = new StringBuilder();
         if (timeInMs > MS_PER_HOUR) {
             result.append(timeInMs / MS_PER_HOUR).append(" hrs ");
         }

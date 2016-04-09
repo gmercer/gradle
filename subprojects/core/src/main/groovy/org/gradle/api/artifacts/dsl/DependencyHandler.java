@@ -19,6 +19,7 @@ import groovy.lang.Closure;
 import org.gradle.api.Action;
 import org.gradle.api.Incubating;
 import org.gradle.api.artifacts.Dependency;
+import org.gradle.api.artifacts.query.ArtifactResolutionQuery;
 
 import java.util.Map;
 
@@ -136,15 +137,15 @@ import java.util.Map;
  *
  * <h3>External dependencies</h3>
  *
- * <p>There are 2 notations supported for declaring a dependency on an external module.
- * One is a String notation formatted this way: group:name:version</p>
+ * <p>There are two notations supported for declaring a dependency on an external module.
+ * One is a string notation formatted this way:</p>
  *
- * <code><i>configurationName</i> "<i>group</i>:<i>name</i>:<i>version</i>:<i>classifier</i>"</code>
+ * <code><i>configurationName</i> "<i>group</i>:<i>name</i>:<i>version</i>:<i>classifier</i>@<i>extension</i>"</code>
  *
  * <p>The other is a map notation:</p>
  *
- * <code><i>configurationName</i> group: <i>group</i>:, name: <i>name</i>, version: <i>version</i>, classifier:
- * <i>classifier</i></code>
+ * <code><i>configurationName</i> group: <i>group</i>, name: <i>name</i>, version: <i>version</i>, classifier:
+ * <i>classifier</i>, ext: <i>extension</i></code>
  *
  * <p>In both notations, all properties, except name, are optional.</p>
  *
@@ -199,9 +200,9 @@ import java.util.Map;
  * </pre>
  *
  * <p>File dependencies are represented using a {@link org.gradle.api.artifacts.SelfResolvingDependency}.</p>
- * 
+ *
  * <h3>Dependencies to other configurations</h3>
- * 
+ *
  * <p>You can add a dependency using a {@link org.gradle.api.artifacts.Configuration}.</p>
  *
  * <p>When the configuration is from the same project as the target configuration, the target configuration is changed
@@ -225,6 +226,9 @@ import java.util.Map;
  *
  *   //our plugin requires Gradle API interfaces and classes to compile:
  *   compile gradleApi()
+ *
+ *   //we will use the Gradle test-kit to test build logic:
+ *   testCompile gradleTestKit()
  * }
  * </pre>
  *
@@ -306,17 +310,26 @@ public interface DependencyHandler {
      * @return The dependency.
      */
     Dependency project(Map<String, ?> notation);
-    
+
     /**
      * Creates a dependency on the API of the current version of Gradle.
      *
      * @return The dependency.
      */
     Dependency gradleApi();
-    
+
+    /**
+     * Creates a dependency on the <a href="http://docs.gradle.org/current/userguide/test_kit.html">Gradle test-kit</a> API.
+     *
+     * @return The dependency.
+     * @since 2.6
+     */
+    @Incubating
+    Dependency gradleTestKit();
+
     /**
      * Creates a dependency on the Groovy that is distributed with the current version of Gradle.
-     * 
+     *
      * @return The dependency.
      */
     Dependency localGroovy();
@@ -332,7 +345,7 @@ public interface DependencyHandler {
     ComponentMetadataHandler getComponents();
 
     /**
-     * Configures module metadata for this project.
+     * Configures component metadata for this project.
      *
      * <p>This method executes the given action against the {@link org.gradle.api.artifacts.dsl.ComponentMetadataHandler} for this project.
      *
@@ -341,6 +354,27 @@ public interface DependencyHandler {
      */
     @Incubating
     void components(Action<? super ComponentMetadataHandler> configureAction);
+
+    /**
+     * Returns the component module metadata handler for this project. The returned handler can be used for adding rules
+     * that modify the metadata of depended-on software components.
+     *
+     * @return the component module metadata handler for this project
+     * @since 2.2
+     */
+    @Incubating
+    ComponentModuleMetadataHandler getModules();
+
+    /**
+     * Configures module metadata for this project.
+     *
+     * <p>This method executes the given action against the {@link org.gradle.api.artifacts.dsl.ComponentModuleMetadataHandler} for this project.
+     *
+     * @param configureAction the action to use to configure module metadata
+     * @since 2.2
+     */
+    @Incubating
+    void modules(Action<? super ComponentModuleMetadataHandler> configureAction);
 
     /**
      * Creates an artifact resolution query.

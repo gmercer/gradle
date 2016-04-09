@@ -34,11 +34,6 @@ class BuildInitPluginIntegrationTest extends WellBehavedPluginTest {
         return "init"
     }
 
-    @Override
-    String getPluginId() {
-        "build-init"
-    }
-
     def "init shows up on tasks overview "() {
         when:
         run 'tasks'
@@ -163,6 +158,42 @@ include 'child'
 
         then:
         failure.assertHasCause("The requested build setup type 'some-unknown-library' is not supported.")
+    }
+
+    def "gives decent error message when using unknown test framework"() {
+        when:
+        fails('init', '--type', 'basic', '--test-framework', 'fake')
+
+        then:
+        failure.assertHasCause("The requested test framework 'fake' is not supported.")
+    }
+
+    def "gives decent error message when test framework is not supported by specific type"() {
+        when:
+        fails('init', '--type', 'basic', '--test-framework', 'spock')
+
+        then:
+        failure.assertHasCause("The requested test framework 'spock' is not supported in 'basic' setup type")
+    }
+
+    def "displays all build types and modifiers in help command output"() {
+        when:
+        run('help', '--task', 'init')
+
+        then:
+        result.output.contains("""Options
+     --type     Set type of build to create.
+                Available values are:
+                     basic
+                     groovy-library
+                     java-library
+                     pom
+                     scala-library
+
+     --test-framework     Set alternative test framework to be used.
+                          Available values are:
+                               spock
+                               testng""");
     }
 
     private TestFile pom() {

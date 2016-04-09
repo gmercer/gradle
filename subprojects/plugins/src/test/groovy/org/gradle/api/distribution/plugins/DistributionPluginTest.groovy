@@ -15,12 +15,14 @@
  */
 
 package org.gradle.api.distribution.plugins
-
+import org.gradle.api.DefaultTask
 import org.gradle.api.Project
+import org.gradle.api.Task
 import org.gradle.api.distribution.DistributionContainer
 import org.gradle.api.tasks.Sync
-import org.gradle.api.tasks.bundling.Zip
+import org.gradle.api.tasks.TaskDependencyMatchers
 import org.gradle.api.tasks.bundling.Tar
+import org.gradle.api.tasks.bundling.Zip
 import org.gradle.util.TestUtil
 import spock.lang.Specification
 
@@ -29,7 +31,7 @@ class DistributionPluginTest extends Specification {
 
     def "adds convention object and a main distribution"() {
         when:
-        project.apply(plugin: DistributionPlugin)
+        project.pluginManager.apply(DistributionPlugin)
 
         then:
         def distributions = project.extensions.getByType(DistributionContainer.class)
@@ -40,7 +42,7 @@ class DistributionPluginTest extends Specification {
 
     def "provides default values for additional distributions"() {
         when:
-        project.apply(plugin: DistributionPlugin)
+        project.pluginManager.apply(DistributionPlugin)
 
         then:
         def distributions = project.extensions.getByType(DistributionContainer.class)
@@ -51,7 +53,7 @@ class DistributionPluginTest extends Specification {
 
     def "adds distZip task for main distribution"() {
         when:
-        project.apply(plugin: DistributionPlugin)
+        project.pluginManager.apply(DistributionPlugin)
 
         then:
         def task = project.tasks.distZip
@@ -61,7 +63,7 @@ class DistributionPluginTest extends Specification {
 
     def "adds distZip task for custom distribution"() {
         when:
-        project.apply(plugin: DistributionPlugin)
+        project.pluginManager.apply(DistributionPlugin)
         project.distributions.create('custom')
 
         then:
@@ -72,7 +74,7 @@ class DistributionPluginTest extends Specification {
 
     def "adds distTar task for main distribution"() {
         when:
-        project.apply(plugin: DistributionPlugin)
+        project.pluginManager.apply(DistributionPlugin)
 
         then:
         def task = project.tasks.distTar
@@ -82,7 +84,7 @@ class DistributionPluginTest extends Specification {
 
     def "adds distTar task for custom distribution"() {
         when:
-        project.apply(plugin: DistributionPlugin)
+        project.pluginManager.apply(DistributionPlugin)
         project.distributions.create('custom')
 
         then:
@@ -91,9 +93,20 @@ class DistributionPluginTest extends Specification {
         task.archivePath == project.file("build/distributions/test-project-custom.tar")
     }
 
+    def "adds assembleDist task for custom distribution"() {
+        when:
+        project.pluginManager.apply(DistributionPlugin)
+        project.distributions.create('custom')
+
+        then:
+        def task = project.tasks.assembleCustomDist
+        task instanceof DefaultTask
+        task TaskDependencyMatchers.dependsOn ("customDistZip","customDistTar")
+    }
+
     def "distribution names include project version when specified"() {
         when:
-        project.apply(plugin: DistributionPlugin)
+        project.pluginManager.apply(DistributionPlugin)
         project.version = '1.2'
 
         then:
@@ -105,7 +118,7 @@ class DistributionPluginTest extends Specification {
 
     def "adds installDist task for main distribution"() {
         when:
-        project.apply(plugin: DistributionPlugin)
+        project.pluginManager.apply(DistributionPlugin)
 
         then:
         def task = project.installDist
@@ -115,7 +128,7 @@ class DistributionPluginTest extends Specification {
 
     def "adds installDist task for custom distribution"() {
         when:
-        project.apply(plugin: DistributionPlugin)
+        project.pluginManager.apply(DistributionPlugin)
         project.distributions.create('custom')
 
         then:
@@ -124,9 +137,18 @@ class DistributionPluginTest extends Specification {
         task.destinationDir == project.file("build/install/test-project-custom")
     }
 
+    def "adds assembleDist task for main distribution"() {
+        when:
+        project.pluginManager.apply(DistributionPlugin)
+
+        then:
+        def task = project.assembleDist
+        task.dependsOn.findAll {it instanceof Task}.collect{ it.path }.containsAll([":distTar", ":distZip"])
+    }
+
     public void "distribution name is configurable"() {
         when:
-        project.apply(plugin: DistributionPlugin)
+        project.pluginManager.apply(DistributionPlugin)
         project.distributions.main.baseName = "SuperApp";
 
         then:

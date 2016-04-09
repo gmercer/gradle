@@ -16,19 +16,17 @@
 
 package org.gradle.launcher.daemon
 
-import org.gradle.launcher.daemon.client.DaemonDisappearedException
+import org.gradle.integtests.fixtures.daemon.DaemonIntegrationSpec
 import org.gradle.launcher.daemon.logging.DaemonMessages
-import org.gradle.util.TextUtil
+import org.gradle.test.fixtures.file.LeaksFileHandles
+import org.gradle.util.GradleVersion
 import spock.lang.Timeout
 
 import static org.gradle.test.fixtures.ConcurrentTestUtil.poll
 
+@LeaksFileHandles
 class DaemonFeedbackIntegrationSpec extends DaemonIntegrationSpec {
-    def setup() {
-        executer.requireIsolatedDaemons()
-    }
-
-    def "daemon keeps logging to the file even if the build is started"() {
+    def "daemon keeps logging to the file even if the build is stopped"() {
         given:
         file("build.gradle") << """
 task sleep << {
@@ -52,9 +50,11 @@ task sleep << {
         then:
         sleeper.waitForFailure()
 
-        def log = readLog(executer.daemonBaseDir)
-        assert log.contains(DaemonMessages.REMOVING_PRESENCE_DUE_TO_STOP)
-        assert log.contains(DaemonMessages.DAEMON_VM_SHUTTING_DOWN)
+        poll(5, 1) {
+            def log = readLog(executer.daemonBaseDir)
+            assert log.contains(DaemonMessages.REMOVING_PRESENCE_DUE_TO_STOP)
+            assert log.contains(DaemonMessages.DAEMON_VM_SHUTTING_DOWN)
+        }
     }
 
     @Timeout(25)
@@ -66,21 +66,6 @@ task sleep << {
         def ex = thrown(Exception)
         ex.message.contains(DaemonMessages.UNABLE_TO_START_DAEMON)
         ex.message.contains("-Xyz")
-    }
-
-    @Timeout(25)
-    def "promptly shows decent message when awkward java home used"() {
-        def dummyJdk = file("dummyJdk").createDir()
-        assert dummyJdk.isDirectory()
-        def jdkPath = TextUtil.escapeString(dummyJdk.canonicalPath)
-        
-        when:
-        executer.withArguments("-Dorg.gradle.java.home=$jdkPath").run()
-
-        then:
-        def ex = thrown(Exception)
-        ex.message.contains('org.gradle.java.home')
-        ex.message.contains(jdkPath)
     }
 
     def "daemon log contains all necessary logging"() {
@@ -115,7 +100,7 @@ task sleep << {
         given:
         file("build.gradle") << "task foo << { println 'hey!' }"
 
-        when: "runing build with --info"
+        when: "running build with --info"
         executer.withArguments("-i").withTasks('foo').run()
 
         then:
@@ -126,8 +111,8 @@ task sleep << {
             //in theory the client could have received result and complete
             // but the daemon has not yet finished processing hence polling
             def daemonLog = readLog(executer.daemonBaseDir)
-            daemonLog.findAll(DaemonMessages.FINISHED_EXECUTING_COMMAND).size() == 1
-            daemonLog.findAll(DaemonMessages.FINISHED_BUILD).size() == 1
+            assert daemonLog.findAll(DaemonMessages.FINISHED_EXECUTING_COMMAND).size() == 1
+            assert daemonLog.findAll(DaemonMessages.FINISHED_BUILD).size() == 1
         }
 
         when: "another build requested with the same daemon with --info"
@@ -169,18 +154,6 @@ task sleep << {
         log.count('error me!') == 1
     }
 
-    def "disappearing daemon makes client log useful information"() {
-        given:
-        file("build.gradle") << "System.exit(0)"
-
-        when:
-        def failure = executer.withArguments("-q").runWithFailure()
-
-        then:
-        failure.error.contains(DaemonDisappearedException.MESSAGE)
-        failure.error.contains(DaemonMessages.DAEMON_VM_SHUTTING_DOWN)
-    }
-
     def "foreground daemon log honors log levels for logging"() {
         given:
         file("build.gradle") << """
@@ -190,7 +163,7 @@ task sleep << {
 
         when:
         def daemon = executer.noExtraLogging().withArguments("--foreground").start()
-        
+
         then:
         poll(60) { assert daemon.standardOutput.contains(DaemonMessages.PROCESS_STARTED) }
 
@@ -216,15 +189,14 @@ task sleep << {
         debugBuild.output.count("debug me!") == 1
     }
 
-    List<File> getLogs(baseDir) {
+    List<File> getLogs(File baseDir) {
         //the gradle version dir
-        assert baseDir.listFiles().length == 1
-        def daemonFiles = baseDir.listFiles()[0].listFiles()
-
-        daemonFiles.findAll { it.name.endsWith('.log') }
+        def daemonDir = new File(baseDir, GradleVersion.current().version)
+        assert daemonDir.exists()
+        daemonDir.listFiles().findAll { it.name.endsWith('.log') }
     }
 
-    String readLog(baseDir) {
+    String readLog(File baseDir) {
         def logs = getLogs(baseDir)
 
         //assert single log
@@ -232,12 +204,12 @@ task sleep << {
 
         logs[0].text
     }
-    
-    void printAllLogs(baseDir) {
+
+    void printAllLogs(File baseDir) {
         getLogs(baseDir).each { println "\n---- ${it.name} ----\n${it.text}\n--------\n" }
     }
 
-    File firstLog(baseDir) {
+    File firstLog(File baseDir) {
         getLogs(baseDir)[0]
     }
 }

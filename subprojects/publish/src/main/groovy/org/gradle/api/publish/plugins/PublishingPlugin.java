@@ -16,11 +16,16 @@
 
 package org.gradle.api.publish.plugins;
 
-import org.gradle.api.*;
+import org.gradle.api.Incubating;
+import org.gradle.api.Plugin;
+import org.gradle.api.Project;
+import org.gradle.api.Task;
 import org.gradle.api.artifacts.dsl.RepositoryHandler;
 import org.gradle.api.internal.artifacts.ArtifactPublicationServices;
 import org.gradle.api.internal.artifacts.ivyservice.projectmodule.DefaultProjectPublication;
 import org.gradle.api.internal.artifacts.ivyservice.projectmodule.ProjectPublicationRegistry;
+import org.gradle.api.internal.project.ProjectIdentifier;
+import org.gradle.api.plugins.ExtensionContainer;
 import org.gradle.api.publish.Publication;
 import org.gradle.api.publish.PublicationContainer;
 import org.gradle.api.publish.PublishingExtension;
@@ -28,9 +33,11 @@ import org.gradle.api.publish.internal.DefaultPublicationContainer;
 import org.gradle.api.publish.internal.DefaultPublishingExtension;
 import org.gradle.api.publish.internal.PublicationInternal;
 import org.gradle.internal.reflect.Instantiator;
-import org.gradle.model.ModelPath;
-import org.gradle.model.ModelRule;
-import org.gradle.model.ModelRules;
+import org.gradle.internal.service.ServiceRegistry;
+import org.gradle.model.Model;
+import org.gradle.model.ModelMap;
+import org.gradle.model.Mutate;
+import org.gradle.model.RuleSource;
 
 import javax.inject.Inject;
 
@@ -46,16 +53,12 @@ public class PublishingPlugin implements Plugin<Project> {
     public static final String PUBLISH_LIFECYCLE_TASK_NAME = "publish";
 
     private final Instantiator instantiator;
-    private final ModelRules modelRules;
     private final ArtifactPublicationServices publicationServices;
-    private final ProjectPublicationRegistry publicationRegistry;
 
     @Inject
-    public PublishingPlugin(ArtifactPublicationServices publicationServices, Instantiator instantiator, ModelRules modelRules, ProjectPublicationRegistry publicationRegistry) {
+    public PublishingPlugin(ArtifactPublicationServices publicationServices, Instantiator instantiator) {
         this.publicationServices = publicationServices;
         this.instantiator = instantiator;
-        this.modelRules = modelRules;
-        this.publicationRegistry = publicationRegistry;
     }
 
     public void apply(final Project project) {
@@ -63,29 +66,36 @@ public class PublishingPlugin implements Plugin<Project> {
         PublicationContainer publications = instantiator.newInstance(DefaultPublicationContainer.class, instantiator);
 
         // TODO Registering an extension should register it with the model registry as well
-        final PublishingExtension extension = project.getExtensions().create(PublishingExtension.NAME, DefaultPublishingExtension.class, repositories, publications);
-
-        project.afterEvaluate(new Action<Project>() {
-            public void execute(Project project) {
-                for (Publication publication : extension.getPublications()) {
-                    PublicationInternal internalPublication = (PublicationInternal) publication;
-                    publicationRegistry.registerPublication(project.getPath(), new DefaultProjectPublication(internalPublication.getCoordinates()));
-                }
-            }
-        });
-
-        ModelPath extensionModelPath = ModelPath.path(PublishingExtension.NAME);
-
-        modelRules.register(extensionModelPath.toString(), extension);
-
-        modelRules.rule(new ModelRule() {
-            public void triggerDeferredConfigurables(PublishingExtension publishingExtension) {
-                project.getExtensions().getByType(DefaultPublishingExtension.class);
-            }
-        });
+        project.getExtensions().create(PublishingExtension.NAME, DefaultPublishingExtension.class, repositories, publications);
 
         Task publishLifecycleTask = project.getTasks().create(PUBLISH_LIFECYCLE_TASK_NAME);
         publishLifecycleTask.setDescription("Publishes all publications produced by this project.");
         publishLifecycleTask.setGroup(PUBLISH_TASK_GROUP);
     }
+
+    static class Rules extends RuleSource {
+        @Model
+        PublishingExtension publishing(ExtensionContainer extensions) {
+            return extensions.getByType(PublishingExtension.class);
+        }
+
+        @Model
+        ProjectPublicationRegistry projectPublicationRegistry(ServiceRegistry serviceRegistry) {
+            return serviceRegistry.get(ProjectPublicationRegistry.class);
+        }
+
+        @Mutate
+        void addConfiguredPublicationsToProjectPublicationRegistry(ProjectPublicationRegistry projectPublicationRegistry, PublishingExtension extension, ProjectIdentifier projectIdentifier) {
+            for (Publication publication : extension.getPublications()) {
+                PublicationInternal internalPublication = (PublicationInternal) publication;
+                projectPublicationRegistry.registerPublication(projectIdentifier.getPath(), new DefaultProjectPublication(internalPublication.getCoordinates()));
+            }
+        }
+
+        @Mutate
+        void tasksDependOnProjectPublicationRegistry(ModelMap<Task> tasks, ProjectPublicationRegistry publicationRegistry) {
+            //do nothing, the rule is here to introduce a dependency on ProjectPublicationRegistry to TaskContainer
+        }
+    }
+
 }

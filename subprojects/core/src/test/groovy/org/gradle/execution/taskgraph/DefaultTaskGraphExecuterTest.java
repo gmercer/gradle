@@ -21,16 +21,20 @@ import org.gradle.api.CircularReferenceException;
 import org.gradle.api.Task;
 import org.gradle.api.execution.TaskExecutionGraphListener;
 import org.gradle.api.execution.TaskExecutionListener;
+import org.gradle.api.execution.internal.InternalTaskExecutionListener;
 import org.gradle.api.internal.TaskInternal;
 import org.gradle.api.internal.project.ProjectInternal;
-import org.gradle.api.internal.tasks.DefaultTaskDependency;
-import org.gradle.api.internal.tasks.TaskStateInternal;
+import org.gradle.api.internal.tasks.*;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.TaskDependency;
-import org.gradle.api.tasks.TaskState;
+import org.gradle.api.tasks.TaskOutputs;
 import org.gradle.execution.TaskFailureHandler;
-import org.gradle.listener.ListenerBroadcast;
-import org.gradle.listener.ListenerManager;
+import org.gradle.initialization.BuildCancellationToken;
+import org.gradle.internal.Factories;
+import org.gradle.internal.TrueTimeProvider;
+import org.gradle.internal.event.ListenerBroadcast;
+import org.gradle.internal.event.ListenerManager;
+import org.gradle.internal.progress.BuildOperationExecutor;
 import org.gradle.util.JUnit4GroovyMockery;
 import org.gradle.util.TestClosure;
 import org.hamcrest.Description;
@@ -56,6 +60,9 @@ import static org.junit.Assert.*;
 public class DefaultTaskGraphExecuterTest {
     final JUnit4Mockery context = new JUnit4GroovyMockery();
     final ListenerManager listenerManager = context.mock(ListenerManager.class);
+    final BuildCancellationToken cancellationToken = context.mock(BuildCancellationToken.class);
+    final BuildOperationExecutor buildOperationExecutor = context.mock(BuildOperationExecutor.class);
+    final TaskExecuter executer = context.mock(TaskExecuter.class);
     DefaultTaskGraphExecuter taskExecuter;
     ProjectInternal root;
     List<Task> executedTasks = new ArrayList<Task>();
@@ -68,8 +75,12 @@ public class DefaultTaskGraphExecuterTest {
             will(returnValue(new ListenerBroadcast<TaskExecutionGraphListener>(TaskExecutionGraphListener.class)));
             one(listenerManager).createAnonymousBroadcaster(TaskExecutionListener.class);
             will(returnValue(new ListenerBroadcast<TaskExecutionListener>(TaskExecutionListener.class)));
+            one(listenerManager).createAnonymousBroadcaster(InternalTaskExecutionListener.class);
+            will(returnValue(new ListenerBroadcast<InternalTaskExecutionListener>(InternalTaskExecutionListener.class)));
+            allowing(cancellationToken).isCancellationRequested();
+            allowing(buildOperationExecutor).getCurrentOperationId();
         }});
-        taskExecuter = new DefaultTaskGraphExecuter(listenerManager, new DefaultTaskPlanExecutor());
+        taskExecuter = new DefaultTaskGraphExecuter(listenerManager, new DefaultTaskPlanExecutor(), Factories.constant(executer), cancellationToken, new TrueTimeProvider(), buildOperationExecutor);
     }
 
     @Test
@@ -278,49 +289,6 @@ public class DefaultTaskGraphExecuterTest {
     }
 
     @Test
-    public void testNotifiesTaskListenerAsTasksAreExecuted() {
-        final TaskExecutionListener listener = context.mock(TaskExecutionListener.class);
-        final Task a = task("a");
-        final Task b = task("b");
-
-        taskExecuter.addTaskExecutionListener(listener);
-        taskExecuter.addTasks(toList(a, b));
-
-        context.checking(new Expectations() {{
-            one(listener).beforeExecute(a);
-            one(listener).afterExecute(with(equalTo(a)), with(notNullValue(TaskState.class)));
-            one(listener).beforeExecute(b);
-            one(listener).afterExecute(with(equalTo(b)), with(notNullValue(TaskState.class)));
-        }});
-
-        taskExecuter.execute();
-    }
-
-    @Test
-    public void testNotifiesTaskListenerWhenTaskFails() {
-        final TaskExecutionListener listener = context.mock(TaskExecutionListener.class);
-        final RuntimeException failure = new RuntimeException();
-        final Task a = brokenTask("a", failure);
-
-        taskExecuter.addTaskExecutionListener(listener);
-        taskExecuter.addTasks(toList(a));
-
-        context.checking(new Expectations() {{
-            one(listener).beforeExecute(a);
-            one(listener).afterExecute(with(sameInstance(a)), with(notNullValue(TaskState.class)));
-        }});
-
-        try {
-            taskExecuter.execute();
-            fail();
-        } catch (RuntimeException e) {
-            assertThat(e, sameInstance(failure));
-        }
-        
-        assertThat(executedTasks, equalTo(toList(a)));
-    }
-
-    @Test
     public void testStopsExecutionOnFirstFailureWhenNoFailureHandlerProvided() {
         final RuntimeException failure = new RuntimeException();
         final Task a = brokenTask("a", failure);
@@ -337,7 +305,7 @@ public class DefaultTaskGraphExecuterTest {
 
         assertThat(executedTasks, equalTo(toList(a)));
     }
-    
+
     @Test
     public void testStopsExecutionOnFailureWhenFailureHandlerIndicatesThatExecutionShouldStop() {
         final TaskFailureHandler handler = context.mock(TaskFailureHandler.class);
@@ -416,7 +384,7 @@ public class DefaultTaskGraphExecuterTest {
         assertThat(taskExecuter.getAllTasks(), equalTo(toList(b)));
 
         taskExecuter.execute();
-        
+
         assertThat(executedTasks, equalTo(toList(b)));
     }
 
@@ -434,9 +402,9 @@ public class DefaultTaskGraphExecuterTest {
         taskExecuter.useFilter(spec);
         taskExecuter.addTasks(toList(c));
         assertThat(taskExecuter.getAllTasks(), equalTo(toList(b, c)));
-        
+
         taskExecuter.execute();
-                
+
         assertThat(executedTasks, equalTo(toList(b, c)));
     }
 
@@ -478,38 +446,49 @@ public class DefaultTaskGraphExecuterTest {
             will(returnValue(toSet(dependsOn)));
         }});
     }
-    
+
     private Task brokenTask(String name, final RuntimeException failure, final Task... dependsOn) {
-        final TaskInternal task = createTask(name);
+        final TaskInternal task = context.mock(TaskInternal.class);
+        final TaskStateInternal state = context.mock(TaskStateInternal.class);
+        final TaskOutputs outputs = context.mock(DefaultTaskOutputs.class);
+        setExpectations(name, task, state, outputs);
         dependsOn(task, dependsOn);
         context.checking(new Expectations() {{
-            atMost(1).of(task).executeWithoutThrowingTaskFailure();
+            atMost(1).of(executer).execute(with(sameInstance(task)), with(sameInstance(state)), with(notNullValue(TaskExecutionContext.class)));
             will(new ExecuteTaskAction(task));
-            allowing(task.getState()).getFailure();
+            allowing(state).getFailure();
             will(returnValue(failure));
-            allowing(task.getState()).rethrowFailure();
+            allowing(state).rethrowFailure();
             will(throwException(failure));
         }});
         return task;
     }
-    
+
     private Task task(final String name, final Task... dependsOn) {
-        final TaskInternal task = createTask(name);
+        final TaskInternal task = context.mock(TaskInternal.class);
+        final TaskStateInternal state = context.mock(TaskStateInternal.class);
+        final TaskOutputs outputs = context.mock(DefaultTaskOutputs.class);
+        setExpectations(name, task, state, outputs);
         dependsOn(task, dependsOn);
         context.checking(new Expectations() {{
-            atMost(1).of(task).executeWithoutThrowingTaskFailure();
+            atMost(1).of(executer).execute(with(sameInstance(task)), with(sameInstance(state)), with(notNullValue(TaskExecutionContext.class)));
             will(new ExecuteTaskAction(task));
-            allowing(task.getState()).getFailure();
+            allowing(state).getFailure();
             will(returnValue(null));
         }});
         return task;
     }
-    
-    private TaskInternal createTask(final String name) {
-        final TaskInternal task = context.mock(TaskInternal.class);
-        context.checking(new Expectations() {{
-            TaskStateInternal state = context.mock(TaskStateInternal.class);
 
+    private TaskInternal createTask(final String name) {
+        TaskInternal task = context.mock(TaskInternal.class);
+        TaskStateInternal state = context.mock(TaskStateInternal.class);
+        final TaskOutputs outputs = context.mock(DefaultTaskOutputs.class);
+        setExpectations(name, task, state, outputs);
+        return task;
+    }
+
+    private void setExpectations(final String name, final TaskInternal task, final TaskStateInternal state, final TaskOutputs outputs) {
+        context.checking(new Expectations() {{
             allowing(task).getProject();
             will(returnValue(root));
             allowing(task).getName();
@@ -517,6 +496,8 @@ public class DefaultTaskGraphExecuterTest {
             allowing(task).getPath();
             will(returnValue(":" + name));
             allowing(task).getState();
+            will(returnValue(state));
+            allowing((Task) task).getState();
             will(returnValue(state));
             allowing(task).getMustRunAfter();
             will(returnValue(new DefaultTaskDependency()));
@@ -536,9 +517,11 @@ public class DefaultTaskGraphExecuterTest {
                     description.appendText("compare to");
                 }
             });
+            allowing(task).getOutputs();
+            will(returnValue(outputs));
+            allowing(outputs).getFiles();
+            will(returnValue(root.files()));
         }});
-
-        return task;
     }
 
     private class ExecuteTaskAction implements org.jmock.api.Action {

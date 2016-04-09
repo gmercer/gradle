@@ -19,41 +19,54 @@ apply plugin: 'c'
 // END SNIPPET apply-plugin
 
 // START SNIPPET libraries
-nativeLibraries {
-    hello {}
+model {
+    components {
+        hello(NativeLibrarySpec)
+    }
 }
 // END SNIPPET libraries
 
 // START SNIPPET executables
-nativeExecutables {
-    main {}
+model {
+    components {
+        main(NativeExecutableSpec) {
+            sources {
+               c.lib library: "hello"
+            }
+        }
+    }
 }
 // END SNIPPET executables
 
-// START SNIPPET source-library
-sources.main.c.lib libraries.hello
-// END SNIPPET source-library
-
 // START SNIPPET compiler-args
-binaries.all {
-    // Define toolchain-specific compiler and linker options
-    if (toolChain in Gcc) {
-        cCompiler.args "-O2"
-        linker.args "-Xlinker", "-S"
-    }
-    if (toolChain in VisualCpp) {
-        cCompiler.args "/Zi"
-        linker.args "/DEBUG"
+model {
+    binaries {
+        all {
+            // Define toolchain-specific compiler and linker options
+            if (toolChain in Gcc) {
+                cCompiler.args "-O2"
+                linker.args "-Xlinker", "-S"
+            }
+            if (toolChain in VisualCpp) {
+                cCompiler.args "/Zi"
+                linker.args "/DEBUG"
+            }
+        }
     }
 }
 // END SNIPPET compiler-args
 
 // START SNIPPET all-shared-libraries
-// For any shared library binaries built with Visual C++, define the DLL_EXPORT macro
-binaries.withType(SharedLibraryBinary) {
-    if (toolChain in VisualCpp) {
-        cCompiler.args "/Zi"
-        cCompiler.define "DLL_EXPORT"
+// For any shared library binaries built with Visual C++,
+// define the DLL_EXPORT macro
+model {
+    binaries {
+        withType(SharedLibraryBinarySpec) {
+            if (toolChain in VisualCpp) {
+                cCompiler.args "/Zi"
+                cCompiler.define "DLL_EXPORT"
+            }
+        }
     }
 }
 // END SNIPPET all-shared-libraries

@@ -22,12 +22,11 @@ import org.gradle.integtests.fixtures.executer.IntegrationTestBuildContext
 import org.gradle.integtests.fixtures.versions.ReleasedVersionDistributions
 import org.gradle.integtests.tooling.fixture.TextUtil
 import org.gradle.integtests.tooling.fixture.ToolingApi
+import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.tooling.GradleConnector
 import org.gradle.tooling.model.GradleProject
 import org.gradle.util.GradleVersion
-import org.gradle.util.SetSystemProperties
-import org.junit.Rule
 import spock.lang.Issue
 
 class ToolingApiIntegrationTest extends AbstractIntegrationSpec {
@@ -35,17 +34,10 @@ class ToolingApiIntegrationTest extends AbstractIntegrationSpec {
     final ToolingApi toolingApi = new ToolingApi(distribution, temporaryFolder)
     final GradleDistribution otherVersion = new ReleasedVersionDistributions().mostRecentFinalRelease
 
-    @Rule SetSystemProperties properties
-
     TestFile projectDir
 
     def setup() {
         projectDir = temporaryFolder.testDirectory
-    }
-
-    def "ensure the previous version supports short-lived daemons"() {
-        expect:
-        otherVersion.daemonIdleTimeoutConfigurable
     }
 
     def "tooling api uses to the current version of gradle when none has been specified"() {
@@ -59,8 +51,6 @@ class ToolingApiIntegrationTest extends AbstractIntegrationSpec {
     }
 
     def "tooling api uses the wrapper properties to determine which version to use"() {
-        toolingApi.isEmbedded = false
-
         projectDir.file('build.gradle').text = """
 task wrapper(type: Wrapper) { distributionUrl = '${otherVersion.binDistribution.toURI()}' }
 task check << { assert gradle.gradleVersion == '${otherVersion.version.version}' }
@@ -69,7 +59,7 @@ task check << { assert gradle.gradleVersion == '${otherVersion.version.version}'
 
         when:
         toolingApi.withConnector { connector ->
-            connector.useDefaultDistribution()
+            connector.useBuildDistribution()
         }
         toolingApi.withConnection { connection -> connection.newBuild().forTasks('check').run() }
 
@@ -78,8 +68,6 @@ task check << { assert gradle.gradleVersion == '${otherVersion.version.version}'
     }
 
     def "tooling api searches up from the project directory to find the wrapper properties"() {
-        toolingApi.isEmbedded = false
-
         projectDir.file('settings.gradle') << "include 'child'"
         projectDir.file('build.gradle') << """
 task wrapper(type: Wrapper) { distributionUrl = '${otherVersion.binDistribution.toURI()}' }
@@ -92,7 +80,7 @@ allprojects {
 
         when:
         toolingApi.withConnector { connector ->
-            connector.useDefaultDistribution()
+            connector.useBuildDistribution()
             connector.searchUpwards(true)
             connector.forProjectDirectory(projectDir.file('child'))
         }
@@ -103,7 +91,6 @@ allprojects {
     }
 
     def "can specify a gradle installation to use"() {
-        toolingApi.isEmbedded = false
         projectDir.file('build.gradle').text = "assert gradle.gradleVersion == '${otherVersion.version.version}'"
 
         when:
@@ -117,7 +104,6 @@ allprojects {
     }
 
     def "can specify a gradle distribution to use"() {
-        toolingApi.isEmbedded = false
         projectDir.file('build.gradle').text = "assert gradle.gradleVersion == '${otherVersion.version.version}'"
 
         when:
@@ -131,8 +117,6 @@ allprojects {
     }
 
     def "can specify a gradle version to use"() {
-        System.setProperty("javax.net.debug", "ssl,handshake")
-        toolingApi.isEmbedded = false
         projectDir.file('build.gradle').text = "assert gradle.gradleVersion == '${otherVersion.version.version}'"
 
         when:
@@ -146,6 +130,7 @@ allprojects {
     }
 
     @Issue("GRADLE-2419")
+    @LeaksFileHandles
     def "tooling API does not hold JVM open"() {
         given:
         def buildFile = projectDir.file("build.gradle")
@@ -163,12 +148,12 @@ allprojects {
 
             repositories {
                 maven { url "${new IntegrationTestBuildContext().libsRepo.toURI()}" }
-                maven { url "http://repo.gradle.org/gradle/repo" }
+                maven { url "https://repo.gradle.org/gradle/repo" }
             }
 
             dependencies {
                 compile "org.gradle:gradle-tooling-api:${distribution.version.version}"
-                runtime 'org.slf4j:slf4j-simple:1.7.2'
+                runtime 'org.slf4j:slf4j-simple:1.7.10'
             }
 
             mainClassName = 'Main'

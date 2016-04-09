@@ -16,53 +16,56 @@
 
 package org.gradle.api.internal.tasks.scala;
 
-import org.gradle.api.AntBuilder;
 import org.gradle.api.GradleException;
+import org.gradle.api.file.FileCollection;
 import org.gradle.api.internal.project.IsolatedAntBuilder;
-import org.gradle.api.internal.project.ProjectInternal;
-import org.gradle.api.internal.tasks.compile.AntJavaCompiler;
-import org.gradle.api.internal.tasks.compile.Compiler;
 import org.gradle.api.internal.tasks.compile.JavaCompileSpec;
-import org.gradle.api.internal.tasks.compile.daemon.CompilerDaemonManager;
-import org.gradle.api.tasks.compile.CompileOptions;
-import org.gradle.api.tasks.scala.ScalaCompileOptions;
-import org.gradle.internal.Factory;
+import org.gradle.api.internal.tasks.compile.JavaCompilerFactory;
+import org.gradle.api.internal.tasks.compile.daemon.CompilerDaemonFactory;
+import org.gradle.language.base.internal.compile.Compiler;
+import org.gradle.language.base.internal.compile.CompilerFactory;
 
-public class ScalaCompilerFactory {
-    private final ProjectInternal project;
+import java.io.File;
+import java.util.Set;
+
+public class ScalaCompilerFactory implements CompilerFactory<ScalaJavaJointCompileSpec> {
     private final IsolatedAntBuilder antBuilder;
-    private final Factory<AntBuilder> antBuilderFactory;
-    private final CompilerDaemonManager compilerDaemonManager;
+    private final JavaCompilerFactory javaCompilerFactory;
+    private final CompilerDaemonFactory compilerDaemonFactory;
+    private FileCollection scalaClasspath;
+    private FileCollection zincClasspath;
+    private final File rootProjectDirectory;
+    private final File gradleUserHomeDir;
 
-    public ScalaCompilerFactory(ProjectInternal project, IsolatedAntBuilder antBuilder, Factory<AntBuilder> antBuilderFactory, CompilerDaemonManager compilerDaemonManager) {
-        this.project = project;
+    public ScalaCompilerFactory(File rootProjectDirectory, IsolatedAntBuilder antBuilder, JavaCompilerFactory javaCompilerFactory, CompilerDaemonFactory compilerDaemonFactory, FileCollection scalaClasspath, FileCollection zincClasspath, File gradleUserHomeDir) {
+        this.rootProjectDirectory = rootProjectDirectory;
         this.antBuilder = antBuilder;
-        this.antBuilderFactory = antBuilderFactory;
-        this.compilerDaemonManager = compilerDaemonManager;
+        this.javaCompilerFactory = javaCompilerFactory;
+        this.compilerDaemonFactory = compilerDaemonFactory;
+        this.scalaClasspath = scalaClasspath;
+        this.zincClasspath = zincClasspath;
+        this.gradleUserHomeDir = gradleUserHomeDir;
     }
 
-    public org.gradle.api.internal.tasks.compile.Compiler<ScalaJavaJointCompileSpec> create(ScalaCompileOptions scalaOptions, CompileOptions javaOptions) {
-        if (scalaOptions.isUseAnt()) {
-            Compiler<ScalaCompileSpec> scalaCompiler = new AntScalaCompiler(antBuilder);
-            Compiler<JavaCompileSpec> javaCompiler = new AntJavaCompiler(antBuilderFactory);
-            return new DefaultScalaJavaJointCompiler(scalaCompiler, javaCompiler);
+    @SuppressWarnings("unchecked")
+    public Compiler<ScalaJavaJointCompileSpec> newCompiler(ScalaJavaJointCompileSpec spec) {
+        ScalaCompileOptionsInternal scalaOptions = (ScalaCompileOptionsInternal) spec.getScalaCompileOptions();
+        Set<File> scalaClasspathFiles = scalaClasspath.getFiles();
+        if (scalaOptions.internalIsUseAnt()) {
+            Compiler<ScalaCompileSpec> scalaCompiler = new AntScalaCompiler(antBuilder, scalaClasspathFiles);
+            Compiler<JavaCompileSpec> javaCompiler = javaCompilerFactory.createForJointCompilation(spec.getClass());
+            return new NormalizingScalaCompiler(new DefaultScalaJavaJointCompiler(scalaCompiler, javaCompiler));
         }
 
-        if (!scalaOptions.isFork()) {
+        if (!scalaOptions.internalIsFork()) {
             throw new GradleException("The Zinc based Scala compiler ('scalaCompileOptions.useAnt=false') "
                     + "requires forking ('scalaCompileOptions.fork=true'), but the latter is set to 'false'.");
         }
 
-        // currently, we leave it to ZincScalaCompiler to also compile the Java code
-        Compiler<ScalaJavaJointCompileSpec> scalaCompiler;
-        try {
-            scalaCompiler = (Compiler<ScalaJavaJointCompileSpec>) getClass().getClassLoader()
-                    .loadClass("org.gradle.api.internal.tasks.scala.jdk6.ZincScalaCompiler").newInstance();
-        } catch (Exception e) {
-            throw new RuntimeException("Internal error: Failed to load org.gradle.api.internal.tasks.scala.jdk6.ZincScalaCompiler", e);
-        }
+        Set<File> zincClasspathFiles = zincClasspath.getFiles();
 
-        scalaCompiler = new DaemonScalaCompiler(project, scalaCompiler, compilerDaemonManager);
+        // currently, we leave it to ZincScalaCompiler to also compile the Java code
+        Compiler<ScalaJavaJointCompileSpec> scalaCompiler = new DaemonScalaCompiler<ScalaJavaJointCompileSpec>(rootProjectDirectory, new ZincScalaCompiler(scalaClasspathFiles, zincClasspathFiles, gradleUserHomeDir), compilerDaemonFactory, zincClasspathFiles);
         return new NormalizingScalaCompiler(scalaCompiler);
     }
 }

@@ -15,55 +15,65 @@
  */
 package org.gradle.launcher.daemon.configuration;
 
+import com.google.common.collect.ImmutableList;
+import org.gradle.api.JavaVersion;
+import org.gradle.api.Nullable;
 import org.gradle.api.internal.file.IdentityFileResolver;
 import org.gradle.initialization.BuildLayoutParameters;
+import org.gradle.internal.jvm.JavaInfo;
 import org.gradle.internal.jvm.Jvm;
-import org.gradle.process.internal.JvmOptions;
 import org.gradle.util.GUtil;
 
 import java.io.File;
-import java.util.*;
-
-import static java.util.Arrays.asList;
-import static org.gradle.util.GFileUtils.canonicalise;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 public class DaemonParameters {
     static final int DEFAULT_IDLE_TIMEOUT = 3 * 60 * 60 * 1000;
 
-    private final String uid;
+    public static final List<String> DEFAULT_JVM_ARGS = ImmutableList.of("-Xmx1024m", "-XX:MaxPermSize=256m", "-XX:+HeapDumpOnOutOfMemoryError");
+    public static final List<String> DEFAULT_JVM_9_ARGS = ImmutableList.of("-Xmx1024m", "-XX:+HeapDumpOnOutOfMemoryError");
+    public static final String INTERACTIVE_TOGGLE = "org.gradle.interactive";
+
+    private final File gradleUserHomeDir;
 
     private File baseDir;
     private int idleTimeout = DEFAULT_IDLE_TIMEOUT;
-    private final JvmOptions jvmOptions = new JvmOptions(new IdentityFileResolver());
-    private boolean usingDefaultJvmArgs = true;
-    private boolean enabled;
-    private File javaHome;
+    private final DaemonJvmOptions jvmOptions = new DaemonJvmOptions(new IdentityFileResolver());
+    private DaemonUsage daemonUsage = DaemonUsage.IMPLICITLY_DISABLED;
+    private boolean hasJvmArgs;
+    private boolean foreground;
+    private boolean stop;
+    private boolean interactive = System.console() != null || Boolean.getBoolean(INTERACTIVE_TOGGLE);
+    private JavaInfo jvm = Jvm.current();
 
     public DaemonParameters(BuildLayoutParameters layout) {
-        this.uid = UUID.randomUUID().toString();
-        jvmOptions.setAllJvmArgs(getDefaultJvmArgs());
+        this(layout, Collections.<String, String>emptyMap());
+    }
+
+    public DaemonParameters(BuildLayoutParameters layout, Map<String, String> extraSystemProperties) {
+        jvmOptions.systemProperties(extraSystemProperties);
         baseDir = new File(layout.getGradleUserHomeDir(), "daemon");
+        gradleUserHomeDir = layout.getGradleUserHomeDir();
     }
 
-    List<String> getDefaultJvmArgs() {
-        return new LinkedList<String>(asList("-Xmx1024m", "-XX:MaxPermSize=256m", "-XX:+HeapDumpOnOutOfMemoryError"));
-    }
-
-    public boolean isEnabled() {
-        return enabled;
+    public boolean isInteractive() {
+        return interactive;
     }
 
     public DaemonParameters setEnabled(boolean enabled) {
-        this.enabled = enabled;
+        daemonUsage = enabled ? DaemonUsage.EXPLICITLY_ENABLED : DaemonUsage.EXPLICITLY_DISABLED;
         return this;
-    }
-
-    public String getUid() {
-        return uid;
     }
 
     public File getBaseDir() {
         return baseDir;
+    }
+
+    public File getGradleUserHomeDir() {
+        return gradleUserHomeDir;
     }
 
     public int getIdleTimeout() {
@@ -78,48 +88,47 @@ public class DaemonParameters {
         return jvmOptions.getAllImmutableJvmArgs();
     }
 
-    public List<String> getAllJvmArgs() {
-        return jvmOptions.getAllJvmArgs();
+    public List<String> getEffectiveSingleUseJvmArgs() {
+        return jvmOptions.getAllSingleUseImmutableJvmArgs();
     }
 
-    public boolean isUsingDefaultJvmArgs() {
-        return usingDefaultJvmArgs;
+    public JavaInfo getEffectiveJvm() {
+        return jvm;
     }
 
-    public File getEffectiveJavaHome() {
-        if (javaHome == null) {
-            return canonicalise(Jvm.current().getJavaHome());
-        }
-        return javaHome;
-    }
-    
-    public String getEffectiveJavaExecutable() {
-        if (javaHome == null) {
-            return Jvm.current().getJavaExecutable().getAbsolutePath();
-        }
-        return Jvm.forHome(javaHome).getJavaExecutable().getAbsolutePath();
-    }
-
-    public DaemonParameters setJavaHome(File javaHome) {
-        this.javaHome = javaHome;
+    @Nullable
+    public DaemonParameters setJvm(JavaInfo jvm) {
+        this.jvm = jvm == null ? Jvm.current() : jvm;
         return this;
+    }
+
+    public void applyDefaultsFor(JavaVersion javaVersion) {
+        if (hasJvmArgs) {
+            return;
+        }
+        if (javaVersion.compareTo(JavaVersion.VERSION_1_9) >= 0) {
+            jvmOptions.jvmArgs(DEFAULT_JVM_9_ARGS);
+        } else {
+            jvmOptions.jvmArgs(DEFAULT_JVM_ARGS);
+        }
     }
 
     public Map<String, String> getSystemProperties() {
         Map<String, String> systemProperties = new HashMap<String, String>();
-        GUtil.addToMap(systemProperties, jvmOptions.getSystemProperties());
+        GUtil.addToMap(systemProperties, jvmOptions.getMutableSystemProperties());
         return systemProperties;
     }
 
     public Map<String, String> getEffectiveSystemProperties() {
         Map<String, String> systemProperties = new HashMap<String, String>();
-        GUtil.addToMap(systemProperties, jvmOptions.getSystemProperties());
+        GUtil.addToMap(systemProperties, jvmOptions.getMutableSystemProperties());
+        GUtil.addToMap(systemProperties, jvmOptions.getImmutableDaemonProperties());
         GUtil.addToMap(systemProperties, System.getProperties());
         return systemProperties;
     }
 
     public void setJvmArgs(Iterable<String> jvmArgs) {
-        usingDefaultJvmArgs = false;
+        hasJvmArgs = true;
         jvmOptions.setAllJvmArgs(jvmArgs);
     }
 
@@ -134,5 +143,25 @@ public class DaemonParameters {
 
     public boolean getDebug() {
         return jvmOptions.getDebug();
+    }
+
+    public DaemonUsage getDaemonUsage() {
+        return daemonUsage;
+    }
+
+    public boolean isForeground() {
+        return foreground;
+    }
+
+    public void setForeground(boolean foreground) {
+        this.foreground = foreground;
+    }
+
+    public boolean isStop() {
+        return stop;
+    }
+
+    public void setStop(boolean stop) {
+        this.stop = stop;
     }
 }

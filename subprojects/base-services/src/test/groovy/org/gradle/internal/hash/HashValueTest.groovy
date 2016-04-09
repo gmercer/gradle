@@ -41,24 +41,31 @@ class HashValueTest extends Specification {
 
         where:
         hexString                          | compactString
-        "1234"                             | "4hk"
-        "abc123"                           | "ang93"
-        "d41d8cd98f00b204e9800998ecf8427e" | "6k3m6dj3o0m82ej009j3mfggju"
-        "FFF"                              | "3vv"
+        "1234"                             | "3lg"
+        "abc123"                           | "6p99f"
+        "d41d8cd98f00b204e9800998ecf8427e" | "ck2u8j60r58fu0sgyxrigm3cu"
+        "FFF"                              | "35r"
     }
 
     def "can roundtrip compact sha1 representation"() {
         given:
         def hash = new HashValue("1234")
-        
+
         expect:
         hash.equals(new HashValue(hash.asHexString()))
     }
-    
+
     def "creates short MD5 for string input"() {
         expect:
-        HashUtil.createCompactMD5("") == "6k3m6dj3o0m82ej009j3mfggju"
-        HashUtil.createCompactMD5("a") == "co5qrjg7hmqk33gsps9kne9j1"
-        HashUtil.createCompactMD5("i") == "46bg60milgs1hubil371u1l1q1"
+        HashUtil.createCompactMD5("") == "ck2u8j60r58fu0sgyxrigm3cu"
+        HashUtil.createCompactMD5("a") == "r6p51cluyxfm1x21kf967yw1"
+        HashUtil.createCompactMD5("i") == "7ycx034q3zbhupl01mv32dx6p"
+    }
+
+    def "creates a zero padded hex string"() {
+        def md5 = new HashValue("19981ffd09dbfad8cb0d33ee3f72d6a")
+        expect:
+        md5.asHexString() == '19981ffd09dbfad8cb0d33ee3f72d6a'
+        md5.asZeroPaddedHexString(32) == '019981ffd09dbfad8cb0d33ee3f72d6a'
     }
 }

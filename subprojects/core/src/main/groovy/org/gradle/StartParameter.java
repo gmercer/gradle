@@ -21,22 +21,23 @@ import com.google.common.collect.Sets;
 import org.apache.commons.lang.builder.EqualsBuilder;
 import org.apache.commons.lang.builder.HashCodeBuilder;
 import org.gradle.api.Incubating;
-import org.gradle.api.internal.classpath.DefaultModuleRegistry;
 import org.gradle.initialization.BuildLayoutParameters;
 import org.gradle.initialization.CompositeInitScriptFinder;
 import org.gradle.initialization.DistributionInitScriptFinder;
 import org.gradle.initialization.UserHomeInitScriptFinder;
-import org.gradle.logging.LoggingConfiguration;
-import org.gradle.util.DeprecationLogger;
-import org.gradle.util.GFileUtils;
+import org.gradle.internal.DefaultTaskExecutionRequest;
+import org.gradle.internal.FileUtils;
+import org.gradle.internal.installation.CurrentGradleInstallation;
+import org.gradle.internal.installation.GradleInstallation;
+import org.gradle.internal.logging.LoggingConfiguration;
 
 import java.io.File;
 import java.io.Serializable;
 import java.util.*;
 
 /**
- * <p>{@code StartParameter} defines the configuration used by a Gradle instance to execute a build. The properties of {@code StartParameter} generally
- * correspond to the command-line options of Gradle.
+ * <p>{@code StartParameter} defines the configuration used by a Gradle instance to execute a build. The properties of {@code StartParameter} generally correspond to the command-line options of
+ * Gradle.
  *
  * <p>You can obtain an instance of a {@code StartParameter} by either creating a new one, or duplicating an existing one using {@link #newInstance} or {@link #newBuild}.</p>
  *
@@ -50,8 +51,7 @@ public class StartParameter extends LoggingConfiguration implements Serializable
      */
     public static final File DEFAULT_GRADLE_USER_HOME = new BuildLayoutParameters().getGradleUserHomeDir();
 
-    private List<TaskParameter> taskParameters = new ArrayList<TaskParameter>();
-    private List<String> taskNames = new ArrayList<String>();
+    private List<TaskExecutionRequest> taskRequests = new ArrayList<TaskExecutionRequest>();
     private Set<String> excludedTaskNames = new LinkedHashSet<String>();
     private boolean buildProjectDependencies = true;
     private File currentDir;
@@ -61,7 +61,6 @@ public class StartParameter extends LoggingConfiguration implements Serializable
     private Map<String, String> systemPropertiesArgs = new HashMap<String, String>();
     private File gradleUserHomeDir;
     private File gradleHomeDir;
-    private CacheUsage cacheUsage = CacheUsage.ON;
     private File settingsFile;
     private boolean useEmptySettings;
     private File buildFile;
@@ -74,8 +73,10 @@ public class StartParameter extends LoggingConfiguration implements Serializable
     private File projectCacheDir;
     private boolean refreshDependencies;
     private boolean recompileScripts;
-    private int parallelThreadCount;
+    private boolean parallelProjectExecution;
     private boolean configureOnDemand;
+    private int maxWorkerCount;
+    private boolean continuous;
 
     /**
      * Sets the project's cache location. Set to null to use the default location.
@@ -97,12 +98,19 @@ public class StartParameter extends LoggingConfiguration implements Serializable
      * Creates a {@code StartParameter} with default values. This is roughly equivalent to running Gradle on the command-line with no arguments.
      */
     public StartParameter() {
-        gradleHomeDir = new DefaultModuleRegistry().getGradleHome();
+        GradleInstallation gradleInstallation = CurrentGradleInstallation.get();
+        if (gradleInstallation == null) {
+            gradleHomeDir = null;
+        } else {
+            gradleHomeDir = gradleInstallation.getGradleHome();
+        }
 
-        BuildLayoutParameters layoutDefaults = new BuildLayoutParameters();
-        searchUpwards = layoutDefaults.getSearchUpwards();
-        currentDir = layoutDefaults.getProjectDir();
-        gradleUserHomeDir = layoutDefaults.getGradleUserHomeDir();
+        BuildLayoutParameters layoutParameters = new BuildLayoutParameters();
+        searchUpwards = layoutParameters.getSearchUpwards();
+        currentDir = layoutParameters.getCurrentDir();
+        projectDir = layoutParameters.getProjectDir();
+        gradleUserHomeDir = layoutParameters.getGradleUserHomeDir();
+        maxWorkerCount = Runtime.getRuntime().availableProcessors();
     }
 
     /**
@@ -120,8 +128,7 @@ public class StartParameter extends LoggingConfiguration implements Serializable
         p.projectDir = projectDir;
         p.settingsFile = settingsFile;
         p.useEmptySettings = useEmptySettings;
-        p.taskParameters = new ArrayList<TaskParameter>(taskParameters);
-        p.taskNames = new ArrayList<String>(taskNames);
+        p.taskRequests = new ArrayList<TaskExecutionRequest>(taskRequests);
         p.excludedTaskNames = new LinkedHashSet<String>(excludedTaskNames);
         p.buildProjectDependencies = buildProjectDependencies;
         p.currentDir = currentDir;
@@ -147,9 +154,8 @@ public class StartParameter extends LoggingConfiguration implements Serializable
 
     protected StartParameter prepareNewBuild(StartParameter p) {
         p.gradleUserHomeDir = gradleUserHomeDir;
-        p.cacheUsage = cacheUsage;
         p.setLogLevel(getLogLevel());
-        p.setColorOutput(isColorOutput());
+        p.setConsoleOutput(getConsoleOutput());
         p.setShowStacktrace(getShowStacktrace());
         p.profile = profile;
         p.continueOnFailure = continueOnFailure;
@@ -157,8 +163,10 @@ public class StartParameter extends LoggingConfiguration implements Serializable
         p.rerunTasks = rerunTasks;
         p.recompileScripts = recompileScripts;
         p.refreshDependencies = refreshDependencies;
-        p.parallelThreadCount = parallelThreadCount;
+        p.parallelProjectExecution = parallelProjectExecution;
         p.configureOnDemand = configureOnDemand;
+        p.maxWorkerCount = maxWorkerCount;
+        p.systemPropertiesArgs = new HashMap<String, String>(systemPropertiesArgs);
         return p;
     }
 
@@ -189,7 +197,7 @@ public class StartParameter extends LoggingConfiguration implements Serializable
             this.buildFile = null;
             setCurrentDir(null);
         } else {
-            this.buildFile = GFileUtils.canonicalise(buildFile);
+            this.buildFile = FileUtils.canonicalize(buildFile);
             setProjectDir(this.buildFile.getParentFile());
         }
     }
@@ -211,16 +219,6 @@ public class StartParameter extends LoggingConfiguration implements Serializable
     }
 
     /**
-     * Deprecated. Use {@link #useEmptySettings()}.
-     *
-     * @deprecated use {@link #useEmptySettings()}
-     */
-    @Deprecated
-    public StartParameter useEmptySettingsScript() {
-        return useEmptySettings();
-    }
-
-    /**
      * Returns whether an empty settings script will be used regardless of whether one exists in the default location.
      *
      * @return Whether to use empty settings or not.
@@ -230,11 +228,16 @@ public class StartParameter extends LoggingConfiguration implements Serializable
     }
 
     /**
-     * Returns the names of the tasks to execute in this build. When empty, the default tasks for the project will be executed.
+     * Returns the names of the tasks to execute in this build. When empty, the default tasks for the project will be executed. If {@link TaskExecutionRequest}s are set for this build then names from
+     * these task parameters are returned.
      *
      * @return the names of the tasks to execute in this build. Never returns null.
      */
     public List<String> getTaskNames() {
+        List<String> taskNames = Lists.newArrayList();
+        for (TaskExecutionRequest taskRequest : taskRequests) {
+            taskNames.addAll(taskRequest.getArgs());
+        }
         return taskNames;
     }
 
@@ -245,7 +248,11 @@ public class StartParameter extends LoggingConfiguration implements Serializable
      * @param taskNames the names of the tasks to execute in this build.
      */
     public void setTaskNames(Iterable<String> taskNames) {
-        this.taskNames = Lists.newArrayList(taskNames);
+        if (taskNames == null) {
+            this.taskRequests = Collections.emptyList();
+        } else {
+            this.taskRequests = Arrays.<TaskExecutionRequest>asList(new DefaultTaskExecutionRequest(taskNames));
+        }
     }
 
     /**
@@ -253,8 +260,9 @@ public class StartParameter extends LoggingConfiguration implements Serializable
      *
      * @return the tasks to execute in this build. Never returns null.
      */
-    public List<TaskParameter> getTaskParameters() {
-        return taskParameters;
+    @Incubating
+    public List<TaskExecutionRequest> getTaskRequests() {
+        return taskRequests;
     }
 
     /**
@@ -263,8 +271,9 @@ public class StartParameter extends LoggingConfiguration implements Serializable
      *
      * @param taskParameters the tasks to execute in this build.
      */
-    public void setTaskParameters(Iterable<TaskParameter> taskParameters) {
-        this.taskParameters = Lists.newArrayList(taskParameters);
+    @Incubating
+    public void setTaskRequests(Iterable<? extends TaskExecutionRequest> taskParameters) {
+        this.taskRequests = Lists.newArrayList(taskParameters);
     }
 
     /**
@@ -301,9 +310,9 @@ public class StartParameter extends LoggingConfiguration implements Serializable
      */
     public void setCurrentDir(File currentDir) {
         if (currentDir != null) {
-            this.currentDir = GFileUtils.canonicalise(currentDir);
+            this.currentDir = FileUtils.canonicalize(currentDir);
         } else {
-            this.currentDir = new BuildLayoutParameters().getProjectDir();
+            this.currentDir = new BuildLayoutParameters().getCurrentDir();
         }
     }
 
@@ -332,24 +341,6 @@ public class StartParameter extends LoggingConfiguration implements Serializable
     }
 
     /**
-     * Deprecated. It is no longer used internally and there's no good reason to keep it.
-     * There is no replacement method.
-     *
-     * Returns a newly constructed map that is the JVM system properties merged with the system property args. <p> System property args take precedence over JVM system properties.
-     *
-     * @return The merged system properties
-     * @deprecated No replacement
-     */
-    @Deprecated
-    public Map<String, String> getMergedSystemProperties() {
-        DeprecationLogger.nagUserOfDiscontinuedMethod("StartParameter.getMergedSystemProperties()");
-        Map<String, String> merged = new HashMap<String, String>();
-        merged.putAll((Map) System.getProperties());
-        merged.putAll(getSystemPropertiesArgs());
-        return merged;
-    }
-
-    /**
      * Returns the directory to use as the user home directory.
      *
      * @return The home directory.
@@ -364,7 +355,7 @@ public class StartParameter extends LoggingConfiguration implements Serializable
      * @param gradleUserHomeDir The home directory. May be null.
      */
     public void setGradleUserHomeDir(File gradleUserHomeDir) {
-        this.gradleUserHomeDir = gradleUserHomeDir == null ? new BuildLayoutParameters().getGradleUserHomeDir() : GFileUtils.canonicalise(gradleUserHomeDir);
+        this.gradleUserHomeDir = gradleUserHomeDir == null ? new BuildLayoutParameters().getGradleUserHomeDir() : FileUtils.canonicalize(gradleUserHomeDir);
     }
 
     /**
@@ -384,51 +375,12 @@ public class StartParameter extends LoggingConfiguration implements Serializable
         return this;
     }
 
-    /**
-     *  Returns the configured CacheUsage.
-     *  @deprecated Use {@link #isRecompileScripts} and/or {@link #isRerunTasks} instead.
-      */
-    @Deprecated
-    public CacheUsage getCacheUsage() {
-        return cacheUsage;
-    }
-
-    /**
-     *  Sets the Cache usage.
-     *  @deprecated Use {@link #setRecompileScripts} and/or {@link #setRerunTasks} instead.
-      */
-    @Deprecated
-    public void setCacheUsage(CacheUsage cacheUsage) {
-        this.cacheUsage = cacheUsage;
-    }
-
     public boolean isDryRun() {
         return dryRun;
     }
 
     public void setDryRun(boolean dryRun) {
         this.dryRun = dryRun;
-    }
-
-    /**
-     * Returns task optimization disabled flag.
-     *
-     * @deprecated Use {@link #isRerunTasks} instead.
-      */
-    @Deprecated
-    public boolean isNoOpt() {
-        return rerunTasks;
-    }
-
-   /**
-    * Get task optimization disabled.
-    *
-    * @param noOpt The boolean value for disabling task optimization.
-    * @deprecated Use {@link #setRerunTasks(boolean)} instead.
-    */
-    @Deprecated
-    public void setNoOpt(boolean noOpt) {
-        this.rerunTasks = noOpt;
     }
 
     /**
@@ -441,7 +393,7 @@ public class StartParameter extends LoggingConfiguration implements Serializable
             this.settingsFile = null;
         } else {
             this.useEmptySettings = false;
-            this.settingsFile = GFileUtils.canonicalise(settingsFile);
+            this.settingsFile = FileUtils.canonicalize(settingsFile);
             currentDir = this.settingsFile.getParentFile();
         }
     }
@@ -494,7 +446,7 @@ public class StartParameter extends LoggingConfiguration implements Serializable
     @Incubating
     public List<File> getAllInitScripts() {
         CompositeInitScriptFinder initScriptFinder = new CompositeInitScriptFinder(
-                new UserHomeInitScriptFinder(getGradleUserHomeDir()), new DistributionInitScriptFinder(gradleHomeDir)
+            new UserHomeInitScriptFinder(getGradleUserHomeDir()), new DistributionInitScriptFinder(gradleHomeDir)
         );
 
         List<File> scripts = new ArrayList<File>(getInitScripts());
@@ -512,7 +464,7 @@ public class StartParameter extends LoggingConfiguration implements Serializable
             setCurrentDir(null);
             this.projectDir = null;
         } else {
-            File canonicalFile = GFileUtils.canonicalise(projectDir);
+            File canonicalFile = FileUtils.canonicalize(projectDir);
             currentDir = canonicalFile;
             this.projectDir = canonicalFile;
         }
@@ -574,24 +526,6 @@ public class StartParameter extends LoggingConfiguration implements Serializable
     }
 
     /**
-     * Supplies the refresh options to use for the build.
-     * @deprecated Use {@link #setRefreshDependencies(boolean)} instead.
-     */
-    @Deprecated
-    public void setRefreshOptions(RefreshOptions refreshOptions) {
-        this.refreshDependencies = refreshOptions.refreshDependencies();
-    }
-
-    /**
-     * Returns the refresh options used for the build.
-     * @deprecated Use {@link #isRefreshDependencies()} instead.
-     */
-    @Deprecated
-    public RefreshOptions getRefreshOptions() {
-        return isRefreshDependencies() ? new RefreshOptions(Arrays.asList(RefreshOptions.Option.DEPENDENCIES)) : RefreshOptions.NONE;
-    }
-
-    /**
      * Specifies whether the dependencies should be refreshed..
      */
     public boolean isRefreshDependencies() {
@@ -636,21 +570,84 @@ public class StartParameter extends LoggingConfiguration implements Serializable
     /**
      * Returns the number of parallel threads to use for build execution.
      *
-     * <0: Automatically determine the optimal number of executors to use.
-     *  0: Do not use parallel execution.
-     * >0: Use this many parallel execution threads.
+     * <0: Automatically determine the optimal number of executors to use. 0: Do not use parallel execution. >0: Use this many parallel execution threads.
+     *
+     * @see #getMaxWorkerCount()
+     * @see #isParallelProjectExecutionEnabled()
+     * @deprecated Use getMaxWorkerCount or isParallelProjectExecutionEnabled instead.
      */
+    @Deprecated
     public int getParallelThreadCount() {
-        return parallelThreadCount;
+        if (isParallelProjectExecutionEnabled()) {
+            return getMaxWorkerCount();
+        }
+        return 0;
     }
 
     /**
      * Specifies the number of parallel threads to use for build execution.
-     * 
+     *
      * @see #getParallelThreadCount()
      */
+    @Deprecated
     public void setParallelThreadCount(int parallelThreadCount) {
-        this.parallelThreadCount = parallelThreadCount;
+        setParallelProjectExecutionEnabled(parallelThreadCount != 0);
+
+        if (parallelThreadCount < 1) {
+            setMaxWorkerCount(Runtime.getRuntime().availableProcessors());
+        } else {
+            setMaxWorkerCount(parallelThreadCount);
+        }
+    }
+
+    /**
+     * Returns true if parallel project execution is enabled.
+     *
+     * @see #getParallelThreadCount()
+     */
+    @Incubating
+    public boolean isParallelProjectExecutionEnabled() {
+        return parallelProjectExecution;
+    }
+
+    /**
+     * Enables/disables parallel project execution.
+     *
+     * @see #isParallelProjectExecutionEnabled()
+     */
+    @Incubating
+    public void setParallelProjectExecutionEnabled(boolean parallelProjectExecution) {
+        this.parallelProjectExecution = parallelProjectExecution;
+    }
+
+    /**
+     * Returns the maximum number of concurrent workers used for underlying build operations.
+     *
+     * Workers can be threads, processes or whatever Gradle considers a "worker".
+     *
+     * Defaults to the number of processors available to the Java virtual machine.
+     *
+     * @return maximum number of concurrent workers, always >= 1.
+     * @see java.lang.Runtime#availableProcessors()
+     */
+    @Incubating
+    public int getMaxWorkerCount() {
+        return maxWorkerCount;
+    }
+
+    /**
+     * Specifies the maximum number of concurrent workers used for underlying build operations.
+     *
+     * @throws IllegalArgumentException if {@code maxWorkerCount} is &lt; 1
+     * @see #getMaxWorkerCount()
+     */
+    @Incubating
+    public void setMaxWorkerCount(int maxWorkerCount) {
+        if (maxWorkerCount < 1) {
+            throw new IllegalArgumentException("Max worker count must be > 0");
+        } else {
+            this.maxWorkerCount = maxWorkerCount;
+        }
     }
 
     /**
@@ -664,27 +661,27 @@ public class StartParameter extends LoggingConfiguration implements Serializable
     @Override
     public String toString() {
         return "StartParameter{"
-                + "taskParameters=" + taskParameters
-                + ", excludedTaskNames=" + excludedTaskNames
-                + ", currentDir=" + currentDir
-                + ", searchUpwards=" + searchUpwards
-                + ", projectProperties=" + projectProperties
-                + ", systemPropertiesArgs=" + systemPropertiesArgs
-                + ", gradleUserHomeDir=" + gradleUserHomeDir
-                + ", gradleHome=" + gradleHomeDir
-                + ", cacheUsage=" + cacheUsage
-                + ", logLevel=" + getLogLevel()
-                + ", showStacktrace=" + getShowStacktrace()
-                + ", buildFile=" + buildFile
-                + ", initScripts=" + initScripts
-                + ", dryRun=" + dryRun
-                + ", rerunTasks=" + rerunTasks
-                + ", recompileScripts=" + recompileScripts
-                + ", offline=" + offline
-                + ", refreshDependencies=" + refreshDependencies
-                + ", parallelThreadCount=" + parallelThreadCount
-                + ", configureOnDemand=" + configureOnDemand
-                + '}';
+            + "taskRequests=" + taskRequests
+            + ", excludedTaskNames=" + excludedTaskNames
+            + ", currentDir=" + currentDir
+            + ", searchUpwards=" + searchUpwards
+            + ", projectProperties=" + projectProperties
+            + ", systemPropertiesArgs=" + systemPropertiesArgs
+            + ", gradleUserHomeDir=" + gradleUserHomeDir
+            + ", gradleHome=" + gradleHomeDir
+            + ", logLevel=" + getLogLevel()
+            + ", showStacktrace=" + getShowStacktrace()
+            + ", buildFile=" + buildFile
+            + ", initScripts=" + initScripts
+            + ", dryRun=" + dryRun
+            + ", rerunTasks=" + rerunTasks
+            + ", recompileScripts=" + recompileScripts
+            + ", offline=" + offline
+            + ", refreshDependencies=" + refreshDependencies
+            + ", parallelProjectExecution=" + parallelProjectExecution
+            + ", configureOnDemand=" + configureOnDemand
+            + ", maxWorkerCount=" + maxWorkerCount
+            + '}';
     }
 
     /**
@@ -698,4 +695,15 @@ public class StartParameter extends LoggingConfiguration implements Serializable
     public void setConfigureOnDemand(boolean configureOnDemand) {
         this.configureOnDemand = configureOnDemand;
     }
+
+    @Incubating
+    public boolean isContinuous() {
+        return continuous;
+    }
+
+    @Incubating
+    public void setContinuous(boolean enabled) {
+        this.continuous = enabled;
+    }
+
 }

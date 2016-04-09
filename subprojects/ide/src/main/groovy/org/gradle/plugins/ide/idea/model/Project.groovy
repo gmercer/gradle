@@ -16,7 +16,8 @@
 package org.gradle.plugins.ide.idea.model
 
 import org.gradle.api.Incubating
-import org.gradle.api.internal.xml.XmlTransformer
+import org.gradle.api.JavaVersion
+import org.gradle.internal.xml.XmlTransformer
 import org.gradle.plugins.ide.internal.generator.XmlPersistableConfigurationObject
 
 /**
@@ -39,50 +40,66 @@ class Project extends XmlPersistableConfigurationObject {
     Jdk jdk
 
     /**
+     * The vcs used by the project.
+     */
+    @Incubating
+    String vcs
+
+    /**
      * The project-level libraries of the IDEA project.
      */
     @Incubating
     Set<ProjectLibrary> projectLibraries = [] as LinkedHashSet
 
     private final PathFactory pathFactory
+    private List<IdeaModule> modules
+    private JavaVersion bytecodeVersion
 
     Project(XmlTransformer xmlTransformer, pathFactory) {
         super(xmlTransformer)
         this.pathFactory = pathFactory
     }
 
-    void configure(Collection<Path> modulePaths, String jdkName, IdeaLanguageLevel languageLevel,
-                   Collection<String> wildcards, Collection<ProjectLibrary> projectLibraries) {
+    void configure(List<IdeaModule> modules, String jdkName, IdeaLanguageLevel languageLevel, JavaVersion bytecodeVersion,
+                   Collection<String> wildcards, Collection<ProjectLibrary> projectLibraries, String vcs) {
         if (jdkName) {
             jdk = new Jdk(jdkName, languageLevel)
         }
+
+        this.bytecodeVersion = bytecodeVersion
+        def modulePaths = modules.collect { pathFactory.relativePath('PROJECT_DIR', it.outputFile) }
         this.modulePaths.addAll(modulePaths)
         this.wildcards.addAll(wildcards)
+        this.modules = modules
         // overwrite rather than append libraries
         this.projectLibraries = projectLibraries
+        this.vcs = vcs
     }
 
-    @Override protected void load(Node xml) {
+    @Override
+    protected void load(Node xml) {
         findModules().module.each { module ->
             this.modulePaths.add(pathFactory.path(module.@fileurl, module.@filepath))
         }
 
-        findWildcardResourcePatterns().entry.each { entry ->
+        findCompilerConfiguration().wildcardResourcePatterns.entry.each { entry ->
             this.wildcards.add(entry.@name)
         }
         def jdkValues = findProjectRootManager().attributes()
 
         jdk = new Jdk(Boolean.parseBoolean(jdkValues.'assert-keyword'), Boolean.parseBoolean(jdkValues.'jdk-15'),
-                jdkValues.languageLevel, jdkValues.'project-jdk-name')
+            jdkValues.languageLevel, jdkValues.'project-jdk-name')
 
         loadProjectLibraries()
     }
 
-    @Override protected String getDefaultResourceName() {
+    @Override
+    protected String getDefaultResourceName() {
         return "defaultProject.xml"
     }
 
-    @Override protected void store(Node xml) {
+    @Override
+    protected void store(Node xml) {
         findModules().replaceNode {
             modules {
                 modulePaths.each { Path modulePath ->
@@ -90,7 +107,7 @@ class Project extends XmlPersistableConfigurationObject {
                 }
             }
         }
-        findWildcardResourcePatterns().replaceNode {
+        findCompilerConfiguration().wildcardResourcePatterns.replaceNode {
             wildcardResourcePatterns {
                 this.wildcards.each { wildcard ->
                     entry(name: wildcard)
@@ -102,19 +119,57 @@ class Project extends XmlPersistableConfigurationObject {
         findProjectRootManager().@languageLevel = jdk.languageLevel
         findProjectRootManager().@'project-jdk-name' = jdk.projectJdkName
 
+        configureBytecodeLevels()
+
+        if (vcs) {
+            findVcsDirectoryMappings().@vcs = vcs
+        }
+
         storeProjectLibraries()
     }
 
-    private findProjectRootManager() {
-        return xml.component.find { it.@name == 'ProjectRootManager'}
+    private void configureBytecodeLevels() {
+        def bytecodeLevelConfiguration = findBytecodeLevelConfiguration()
+        bytecodeLevelConfiguration.@'target' = bytecodeVersion.toString()
+        for (IdeaModule module : modules) {
+            def moduleNode = bytecodeLevelConfiguration.module.find { moduleNode -> moduleNode.'@name' == module.name }
+            def moduleBytecodeVersionOverwrite = module.getTargetBytecodeVersion()
+            if (moduleBytecodeVersionOverwrite == null) {
+                if (moduleNode != null) {
+                    moduleNode.replaceNode {}
+                }
+            } else {
+                if (moduleNode == null) {
+                    moduleNode = bytecodeLevelConfiguration.appendNode('module')
+                    moduleNode.@'name' = module.name
+                }
+                moduleNode.@'target' = moduleBytecodeVersionOverwrite.toString()
+            }
+        }
     }
 
-    private findWildcardResourcePatterns() {
-        xml.component.find { it.@name == 'CompilerConfiguration'}.wildcardResourcePatterns
+    private findProjectRootManager() {
+        xml.component.find { it.@name == 'ProjectRootManager' }
+    }
+
+    private findCompilerConfiguration() {
+        xml.component.find { it.@name == 'CompilerConfiguration' }
+    }
+
+    private findBytecodeLevelConfiguration() {
+        def compilerConfiguration = findCompilerConfiguration()
+        if (!compilerConfiguration.bytecodeTargetLevel) {
+            compilerConfiguration.appendNode('bytecodeTargetLevel')
+        }
+        compilerConfiguration.find { it.name() == 'bytecodeTargetLevel' }
+    }
+
+    private findVcsDirectoryMappings() {
+        xml.component.find { it.@name == 'VcsDirectoryMappings' }.mapping
     }
 
     private findModules() {
-        def moduleManager = xml.component.find { it.@name == 'ProjectModuleManager'}
+        def moduleManager = xml.component.find { it.@name == 'ProjectModuleManager' }
         if (!moduleManager.modules) {
             moduleManager.appendNode('modules')
         }
@@ -124,7 +179,7 @@ class Project extends XmlPersistableConfigurationObject {
     private Node findLibraryTable() {
         def libraryTable = xml.component.find { it.@name == 'libraryTable' }
         if (!libraryTable) {
-            libraryTable = xml.appendNode('component', [name:  'libraryTable'])
+            libraryTable = xml.appendNode('component', [name: 'libraryTable'])
         }
         libraryTable
     }
@@ -153,25 +208,42 @@ class Project extends XmlPersistableConfigurationObject {
     }
 
     boolean equals(o) {
-        if (this.is(o)) { return true }
+        if (this.is(o)) {
+            return true
+        }
 
-        if (getClass() != o.class) { return false }
+        if (getClass() != o.class) {
+            return false
+        }
 
         Project project = (Project) o;
 
-        if (jdk != project.jdk) { return false }
-        if (modulePaths != project.modulePaths) { return false }
-        if (wildcards != project.wildcards) { return false }
+        if (jdk != project.jdk) {
+            return false
+        }
+        if (modulePaths != project.modulePaths) {
+            return false
+        }
+        if (projectLibraries != project.projectLibraries) {
+            return false
+        }
+        if (wildcards != project.wildcards) {
+            return false
+        }
+        if (vcs != project.vcs) {
+            return false
+        }
 
         return true;
     }
 
     int hashCode() {
         int result;
-
         result = (modulePaths != null ? modulePaths.hashCode() : 0);
         result = 31 * result + (wildcards != null ? wildcards.hashCode() : 0);
+        result = 31 * result + (projectLibraries != null ? projectLibraries.hashCode() : 0);
         result = 31 * result + (jdk != null ? jdk.hashCode() : 0);
+        result = 31 * result + (vcs != null ? vcs.hashCode() : 0);
         return result;
     }
 }

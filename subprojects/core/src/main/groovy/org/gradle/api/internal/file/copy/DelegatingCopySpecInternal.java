@@ -26,7 +26,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-abstract public class DelegatingCopySpecInternal implements CopySpecInternal {
+public abstract class DelegatingCopySpecInternal implements CopySpecInternal {
 
     abstract protected CopySpecInternal getDelegateCopySpec();
 
@@ -212,5 +212,13 @@ abstract public class DelegatingCopySpecInternal implements CopySpecInternal {
 
     public CopySpecResolver buildResolverRelativeToParent(CopySpecResolver parent) {
         return getDelegateCopySpec().buildResolverRelativeToParent(parent);
+    }
+
+    public String getFilteringCharset() {
+        return getDelegateCopySpec().getFilteringCharset();
+    }
+
+    public void setFilteringCharset(String charset) {
+        getDelegateCopySpec().setFilteringCharset(charset);
     }
 }

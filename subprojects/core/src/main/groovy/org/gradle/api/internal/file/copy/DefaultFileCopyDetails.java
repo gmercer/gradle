@@ -22,7 +22,7 @@ import org.gradle.api.file.DuplicatesStrategy;
 import org.gradle.api.file.FileVisitDetails;
 import org.gradle.api.file.RelativePath;
 import org.gradle.api.internal.file.AbstractFileTreeElement;
-import org.gradle.internal.nativeplatform.filesystem.Chmod;
+import org.gradle.internal.nativeintegration.filesystem.Chmod;
 
 import java.io.*;
 import java.util.Map;
@@ -30,7 +30,7 @@ import java.util.Map;
 public class DefaultFileCopyDetails extends AbstractFileTreeElement implements FileVisitDetails, FileCopyDetailsInternal {
     private final FileVisitDetails fileDetails;
     private final CopySpecResolver specResolver;
-    private final FilterChain filterChain = new FilterChain();
+    private final FilterChain filterChain;
     private RelativePath relativePath;
     private boolean excluded;
     private Integer mode;
@@ -38,6 +38,7 @@ public class DefaultFileCopyDetails extends AbstractFileTreeElement implements F
 
     public DefaultFileCopyDetails(FileVisitDetails fileDetails, CopySpecResolver specResolver, Chmod chmod) {
         super(chmod);
+        this.filterChain = new FilterChain(specResolver.getFilteringCharset());
         this.fileDetails = fileDetails;
         this.specResolver = specResolver;
         this.duplicatesStrategy = specResolver.getDuplicatesStrategy();
@@ -89,11 +90,11 @@ public class DefaultFileCopyDetails extends AbstractFileTreeElement implements F
         }
     }
 
-    public void copyTo(OutputStream outstr) {
+    public void copyTo(OutputStream output) {
         if (filterChain.hasFilters()) {
-            super.copyTo(outstr);
+            super.copyTo(output);
         } else {
-            fileDetails.copyTo(outstr);
+            fileDetails.copyTo(output);
         }
     }
 
@@ -108,10 +109,8 @@ public class DefaultFileCopyDetails extends AbstractFileTreeElement implements F
     }
 
     private void adaptPermissions(File target) {
-        final Integer specMode = getMode();
-        if(specMode !=null){
-            getChmod().chmod(target, specMode);
-        }
+        int specMode = getMode();
+        getChmod().chmod(target, specMode);
     }
 
     public RelativePath getRelativePath() {
@@ -189,6 +188,18 @@ public class DefaultFileCopyDetails extends AbstractFileTreeElement implements F
 
     public DuplicatesStrategy getDuplicatesStrategy() {
         return this.duplicatesStrategy;
+    }
+
+    public String getSourceName() {
+        return this.fileDetails.getName();
+    }
+
+    public String getSourcePath() {
+        return this.fileDetails.getPath();
+    }
+
+    public RelativePath getRelativeSourcePath() {
+        return this.fileDetails.getRelativePath();
     }
 
     private static class ByteCountingOutputStream extends OutputStream {

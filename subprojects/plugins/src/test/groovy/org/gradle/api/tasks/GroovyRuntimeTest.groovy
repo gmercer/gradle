@@ -26,7 +26,7 @@ class GroovyRuntimeTest extends Specification {
     def project = TestUtil.createRootProject()
 
     def setup() {
-        project.plugins.apply(GroovyBasePlugin)
+        project.pluginManager.apply(GroovyBasePlugin)
     }
 
     GroovyRuntime getGroovyRuntime() {
@@ -54,51 +54,17 @@ class GroovyRuntimeTest extends Specification {
 
         then:
         classpath instanceof LazilyInitializedFileCollection
-        with(classpath.delegate) {
+        classpath.sourceCollections.size() == 1
+        with(classpath.sourceCollections[0]) {
             it instanceof Configuration
             state == Configuration.State.UNRESOLVED
-            dependencies.size() == 1
+            dependencies.size() == 2
             dependencies.any { it.group == "org.codehaus.groovy" && it.name == "groovy" && it.version == "2.1.2" } // not sure how to check classifier
+            dependencies.any { it.group == "org.codehaus.groovy" && it.name == "groovy-ant" && it.version == "2.1.2" } // not sure how to check classifier
         }
 
         where:
         classifier << ["", "-indy"]
-    }
-
-    def "inferred Groovy class path falls back to contents of 'groovy' configuration if the latter is explicitly configured"() {
-        project.dependencies {
-            groovy project.files("my-groovy.jar")
-        }
-
-        when:
-        def classpath = project.groovyRuntime.inferGroovyClasspath([project.file("other.jar"), project.file("groovy-all-2.1.2.jar")])
-
-        then:
-        classpath.singleFile.name == "my-groovy.jar"
-    }
-
-    def "inferred Groovy class path falls back to contents of 'groovy' configuration if no Groovy Jar found on class path"() {
-        project.dependencies {
-            groovy project.files("my-groovy.jar")
-        }
-
-        when:
-        def classpath = project.groovyRuntime.inferGroovyClasspath([project.file("other.jar"), project.file("other2.jar")])
-
-        then:
-        classpath.singleFile.name == "my-groovy.jar"
-    }
-
-    def "inferred Groovy class path falls back to contents of 'groovy' configuration if 'groovy' Jar found and no repository declared"() {
-        project.dependencies {
-            groovy project.files("my-groovy.jar")
-        }
-
-        when:
-        def classpath = project.groovyRuntime.inferGroovyClasspath([project.file("other.jar"), project.file("groovy-2.1.2.jar")])
-
-        then:
-        classpath.singleFile.name == "my-groovy.jar"
     }
 
     def "useful error message is produced when no groovy runtime could be found on a classpath"() {

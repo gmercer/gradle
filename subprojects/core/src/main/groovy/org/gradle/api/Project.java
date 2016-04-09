@@ -23,10 +23,7 @@ import org.gradle.api.artifacts.dsl.ArtifactHandler;
 import org.gradle.api.artifacts.dsl.DependencyHandler;
 import org.gradle.api.artifacts.dsl.RepositoryHandler;
 import org.gradle.api.component.SoftwareComponentContainer;
-import org.gradle.api.file.ConfigurableFileCollection;
-import org.gradle.api.file.ConfigurableFileTree;
-import org.gradle.api.file.CopySpec;
-import org.gradle.api.file.FileTree;
+import org.gradle.api.file.*;
 import org.gradle.api.initialization.dsl.ScriptHandler;
 import org.gradle.internal.HasInternalProtocol;
 import org.gradle.api.invocation.Gradle;
@@ -37,6 +34,8 @@ import org.gradle.api.resources.ResourceHandler;
 import org.gradle.api.tasks.TaskContainer;
 import org.gradle.api.tasks.WorkResult;
 import org.gradle.process.ExecResult;
+import org.gradle.process.ExecSpec;
+import org.gradle.process.JavaExecSpec;
 
 import java.io.File;
 import java.net.URI;
@@ -65,7 +64,7 @@ import java.util.Set;
  * <code>Project</code> instances.</li>
  *
  * <li>Finally, evaluate each <code>Project</code> by executing its <code>{@value #DEFAULT_BUILD_FILE}</code> file, if
- * present, against the project. The project are evaluated in breadth-wise order, such that a project is evaluated
+ * present, against the project. The projects are evaluated in breadth-wise order, such that a project is evaluated
  * before its child projects. This order can be overridden by calling <code>{@link #evaluationDependsOnChildren()}</code> or by adding an
  * explicit evaluation dependency using <code>{@link #evaluationDependsOn(String)}</code>.</li>
  *
@@ -75,7 +74,7 @@ import java.util.Set;
  *
  * <p>A project is essentially a collection of {@link Task} objects. Each task performs some basic piece of work, such
  * as compiling classes, or running unit tests, or zipping up a WAR file. You add tasks to a project using one of the
- * {@code add()} methods on {@link TaskContainer}, such as {@link TaskContainer#add(String)}.  You can locate existing
+ * {@code create()} methods on {@link TaskContainer}, such as {@link TaskContainer#create(String)}.  You can locate existing
  * tasks using one of the lookup methods on {@link TaskContainer}, such as {@link org.gradle.api.tasks.TaskCollection#getByName(String)}.</p>
  *
  * <h3>Dependencies</h3>
@@ -93,6 +92,13 @@ import java.util.Set;
  *
  * <p>Projects are arranged into a hierarchy of projects. A project has a name, and a fully qualified path which
  * uniquely identifies it in the hierarchy.</p>
+ *
+ * <h3>Plugins</h3>
+ *
+ * <p>
+ * Plugins can be used to modularise and reuse project configuration.
+ * Plugins can be applied using the {@link PluginAware#apply(java.util.Map)} method, or by using the {@link org.gradle.plugin.use.PluginDependenciesSpec plugins script block}.
+ * </p>
  *
  * <a name="properties"/> <h3>Properties</h3>
  *
@@ -118,36 +124,35 @@ import java.util.Set;
  * <code>rootProject</code> property.  The properties of this scope are readable or writable depending on the presence
  * of the corresponding getter or setter method.</li>
  *
- * <li>The <em>additional</em> properties of the project.  Each project maintains a map of additional properties, which
- * can contain any arbitrary name -> value pair.  The properties of this scope are readable and writable.</li>
+ * <li>The <em>extra</em> properties of the project.  Each project maintains a map of extra properties, which
+ * can contain any arbitrary name -> value pair.  Once defined, the properties of this scope are readable and writable.
+ * See <a href="#extraproperties">extra properties</a> for more details.</li>
  *
- * <li>The <em>convention</em> properties added to the project by each {@link Plugin} applied to the project. A {@link
- * Plugin} can add properties and methods to a project through the project's {@link Convention} object.  The properties
- * of this scope may be readable or writable, depending on the convention objects.</li>
+ * <li>The <em>extensions</em> added to the project by the plugins. Each extension is available as a read-only property with the same name as the extension.</li>
+ *
+ * <li>The <em>convention</em> properties added to the project by the plugins. A plugin can add properties and methods
+ * to a project through the project's {@link Convention} object.  The properties of this scope may be readable or writable, depending on the convention objects.</li>
  *
  * <li>The tasks of the project.  A task is accessible by using its name as a property name.  The properties of this
  * scope are read-only. For example, a task called <code>compile</code> is accessible as the <code>compile</code>
  * property.</li>
  *
- * <li>The additional properties and convention properties of the project's parent project, recursively up to the root
+ * <li>The extra properties and convention properties inherited from the project's parent, recursively up to the root
  * project. The properties of this scope are read-only.</li>
  *
  * </ul>
  *
  * <p>When reading a property, the project searches the above scopes in order, and returns the value from the first
- * scope it finds the property in.  See {@link #property(String)} for more details.</p>
+ * scope it finds the property in. If not found, an exception is thrown. See {@link #property(String)} for more details.</p>
  *
  * <p>When writing a property, the project searches the above scopes in order, and sets the property in the first scope
- * it finds the property in. If not found, the project adds the property to its map of additional properties.  For the
- * next few releases a deprecation warning will be issued when trying to set a property that does not exist. Dynamic
- * properties will eventually be removed entirely, meaning that this will be a fatal error in future versions of Gradle.
- * See Extra Properties to learn how to add properties dynamically. </p>
+ * it finds the property in. If not found, an exception is thrown. See {@link #setProperty(String, Object)} for more details.</p>
  *
  * <a name="extraproperties"/> <h4>Extra Properties</h4>
  *
- * All extra properties must be created through the &quot;ext&quot; namespace. Once extra properties have been created,
- * they are available on the owning object (in the below case the Project, Task, and sub-projects respectively) and can
- * be read and changed. It's only the initial declaration that needs to be done via the namespace.
+ * All extra properties must be defined through the &quot;ext&quot; namespace. Once an extra property has been defined,
+ * it is available directly on the owning object (in the below case the Project, Task, and sub-projects respectively) and can
+ * be read and updated. Only the initial declaration that needs to be done via the namespace.
  *
  * <pre>
  * project.ext.prop1 = "foo"
@@ -176,15 +181,18 @@ import java.util.Set;
  *
  * <li>The build file. The project searches for a matching method declared in the build file.</li>
  *
- * <li>The <em>convention</em> methods added to the project by each {@link Plugin} applied to the project. A {@link
- * Plugin} can add properties and method to a project through the project's {@link Convention} object.</li>
+ * <li>The <em>extensions</em> added to the project by the plugins. Each extension is available as a method which takes
+ * a closure or {@link org.gradle.api.Action} as a parameter.</li>
+ *
+ * <li>The <em>convention</em> methods added to the project by the plugins. A plugin can add properties and method to
+ * a project through the project's {@link Convention} object.</li>
  *
  * <li>The tasks of the project. A method is added for each task, using the name of the task as the method name and
- * taking a single closure parameter. The method calls the {@link Task#configure(groovy.lang.Closure)} method for the
+ * taking a single closure or {@link org.gradle.api.Action} parameter. The method calls the {@link Task#configure(groovy.lang.Closure)} method for the
  * associated task with the provided closure. For example, if the project has a task called <code>compile</code>, then a
  * method is added with the following signature: <code>void compile(Closure configureClosure)</code>.</li>
  *
- * <li>The parent project, recursively up to the root project.</li>
+ * <li>The methods of the parent project, recursively up to the root project.</li>
  *
  * </ul>
  */
@@ -285,7 +293,7 @@ public interface Project extends Comparable<Project>, ExtensionAware, PluginAwar
 
     /**
      * <p>Returns the group of this project. Gradle always uses the {@code toString()} value of the group. The group
-     * defaults to the path with dots a separators.</p>
+     * defaults to the path with dots as separators.</p>
      *
      * @return The group of this project. Never returns null.
      */
@@ -334,17 +342,10 @@ public interface Project extends Comparable<Project>, ExtensionAware, PluginAwar
     /**
      * <p>Returns the direct children of this project.</p>
      *
-     * @return A map from child project name to child project. Returns an empty map if this this project does not have
+     * @return A map from child project name to child project. Returns an empty map if this project does not have
      *         any children.
      */
     Map<String, Project> getChildProjects();
-
-    /**
-     * <p>Returns the set of projects which this project depends on.</p>
-     *
-     * @return The set of projects. Returns an empty set if this project depends on no projects.
-     */
-    Set<Project> getDependsOnProjects();
 
     /**
      * <p>Sets a property of this project.  This method searches for a property with the given name in the following
@@ -357,17 +358,16 @@ public interface Project extends Comparable<Project>, ExtensionAware, PluginAwar
      * <li>The project's {@link Convention} object.  For example, the <code>srcRootName</code> java plugin
      * property.</li>
      *
-     * <li>The project's additional properties.</li>
+     * <li>The project's extra properties.</li>
      *
      * </ol>
      *
-     * <p>If the property is not found in any of these locations, it is added to the project's additional
-     * properties.</p>
+     * If the property is not found, a {@link groovy.lang.MissingPropertyException} is thrown.
      *
      * @param name The name of the property
      * @param value The value of the property
      */
-    void setProperty(String name, Object value);
+    void setProperty(String name, Object value) throws MissingPropertyException;
 
     /**
      * <p>Returns this project. This method is useful in build files to explicitly access project properties and
@@ -514,27 +514,6 @@ public interface Project extends Comparable<Project>, ExtensionAware, PluginAwar
     void defaultTasks(String... defaultTasks);
 
     /**
-     * <p>Declares that this project has an execution dependency on the project with the given path.</p>
-     *
-     * @deprecated Use {@link Task#dependsOn(Object...)} instead.
-     * @param path The path of the project which this project depends on.
-     * @throws UnknownProjectException If no project with the given path exists.
-     */
-    @Deprecated
-    void dependsOn(String path) throws UnknownProjectException;
-
-    /**
-     * <p>Declares that this project has an execution dependency on the project with the given path.</p>
-     *
-     * @deprecated Use {@link Task#dependsOn(Object...)} instead.
-     * @param path The path of the project which this project depends on.
-     * @param evaluateDependsOnProject If true, adds an evaluation dependency.
-     * @throws UnknownProjectException If no project with the given path exists.
-     */
-    @Deprecated
-    void dependsOn(String path, boolean evaluateDependsOnProject) throws UnknownProjectException;
-
-    /**
      * <p>Declares that this project has an evaluation dependency on the project with the given path.</p>
      *
      * @param path The path of the project which this project depends on.
@@ -548,36 +527,6 @@ public interface Project extends Comparable<Project>, ExtensionAware, PluginAwar
      *
      */
     void evaluationDependsOnChildren();
-
-    /**
-     * <p>Declares that all child projects of this project have an execution dependency on this project.</p>
-     *
-     * @deprecated Use {@link Task#dependsOn(Object...)} instead.
-     * @return this project.
-     */
-    @Deprecated
-    Project childrenDependOnMe();
-
-    /**
-     * <p>Declares that this project has an execution dependency on each of its child projects.</p>
-     *
-     * @deprecated Use {@link Task#dependsOn(Object...)} instead.
-     * @return this project.
-     */
-    @Deprecated
-    Project dependsOnChildren();
-
-    /**
-     * <p>Declares that this project has an execution dependency on each of its child projects.</p>
-     *
-     * @deprecated To definde task dependencies use {@link Task#dependsOn(Object...)} instead.
-     * For declaring evaluation dependencies to child projects, use evaluation dependencies
-     * use {@link #evaluationDependsOnChildren()}.
-     * @param evaluateDependsOnProject If true, adds an evaluation dependency.
-     * @return this project.
-     */
-    @Deprecated
-    Project dependsOnChildren(boolean evaluateDependsOnProject);
 
     /**
      * <p>Locates a project by path. If the path is relative, it is interpreted relative to this project.</p>
@@ -652,8 +601,6 @@ public interface Project extends Comparable<Project>, ExtensionAware, PluginAwar
      *
      * <li>A {@link java.util.concurrent.Callable}. The callable's return value is resolved recursively.</li>
      *
-     * <li>An Object. Its {@code toString()} value is treated the same way as a String.
-     * This is deprecated and will be removed in the next version of Gradle.</li>
      * </ul>
      *
      * @param path The object to resolve as a File.
@@ -759,16 +706,19 @@ public interface Project extends Comparable<Project>, ExtensionAware, PluginAwar
      * <p>Creates a new {@code ConfigurableFileTree} using the given base directory. The given baseDir path is evaluated
      * as per {@link #file(Object)}.</p>
      *
-     * <p><b>Note:</b> to use a closure as the baseDir, you must explicitly cast the closure to {@code Object} to force
-     * the use of this method instead of {@link #fileTree(Closure)}. Example:</p>
-     *
-     * <pre>
-     * fileTree((Object){ someDir })
-     * </pre>
-     *
      * <p>The returned file tree is lazy, so that it scans for files only when the contents of the file tree are
      * queried. The file tree is also live, so that it scans for files each time the contents of the file tree are
      * queried.</p>
+     *
+     * <pre autoTested=''>
+     * def myTree = fileTree("src")
+     * myTree.include "**&#47;*.java"
+     * myTree.builtBy "someTask"
+     *
+     * task copy(type: Copy) {
+     *    from myTree
+     * }
+     * </pre>
      *
      * @param baseDir The base directory of the file tree. Evaluated as per {@link #file(Object)}.
      * @return the file tree. Never returns null.
@@ -780,10 +730,15 @@ public interface Project extends Comparable<Project>, ExtensionAware, PluginAwar
      * as per {@link #file(Object)}. The closure will be used to configure the new file tree.
      * The file tree is passed to the closure as its delegate.  Example:</p>
      *
-     * <pre>
-     * fileTree('src') {
-     *    exclude '**&#47;.svn/**'
-     * }.copy { into 'dest'}
+     * <pre autoTested=''>
+     * def myTree = fileTree('src') {
+     *    exclude '**&#47;.data/**'
+     *    builtBy 'someTask'
+     * }
+     *
+     * task copy(type: Copy) {
+     *    from myTree
+     * }
      * </pre>
      *
      * <p>The returned file tree is lazy, so that it scans for files only when the contents of the file tree are
@@ -800,8 +755,12 @@ public interface Project extends Comparable<Project>, ExtensionAware, PluginAwar
      * <p>Creates a new {@code ConfigurableFileTree} using the provided map of arguments.  The map will be applied as
      * properties on the new file tree.  Example:</p>
      *
-     * <pre>
-     * fileTree(dir:'src', excludes:['**&#47;ignore/**','**&#47;.svn/**'])
+     * <pre autoTested=''>
+     * def myTree = fileTree(dir:'src', excludes:['**&#47;ignore/**', '**&#47;.data/**'])
+     *
+     * task copy(type: Copy) {
+     *     from myTree
+     * }
      * </pre>
      *
      * <p>The returned file tree is lazy, so that it scans for files only when the contents of the file tree are
@@ -812,28 +771,6 @@ public interface Project extends Comparable<Project>, ExtensionAware, PluginAwar
      * @return the configured file tree. Never returns null.
      */
     ConfigurableFileTree fileTree(Map<String, ?> args);
-
-    /**
-     * <p>Creates a new {@code ConfigurableFileTree} using the provided closure.  The closure will be used to configure
-     * the new file tree. The file tree is passed to the closure as its delegate.  Example:</p>
-     *
-     * <pre>
-     * fileTree {
-     *    from 'src'
-     *    exclude '**&#47;.svn/**'
-     * }.copy { into 'dest'}
-     * </pre>
-     *
-     * <p>The returned file tree is lazy, so that it scans for files only when the contents of the file tree are
-     * queried. The file tree is also live, so that it scans for files each time the contents of the file tree are
-     * queried.</p>
-     *
-     * @deprecated Use {@link #fileTree(Object,Closure)} instead.
-     * @param closure Closure to configure the {@code ConfigurableFileTree} object
-     * @return the configured file tree. Never returns null.
-     */
-    @Deprecated
-    ConfigurableFileTree fileTree(Closure closure);
 
     /**
      * <p>Creates a new {@code FileTree} which contains the contents of the given ZIP file. The given zipPath path is
@@ -848,7 +785,6 @@ public interface Project extends Comparable<Project>, ExtensionAware, PluginAwar
      * @return the file tree. Never returns null.
      */
     FileTree zipTree(Object zipPath);
-
 
     /**
      * Creates a new {@code FileTree} which contains the contents of the given TAR file. The given tarPath path can be:
@@ -898,11 +834,29 @@ public interface Project extends Comparable<Project>, ExtensionAware, PluginAwar
 
     /**
      * Deletes files and directories.
+     * <p>
+     * This will not follow symlinks. If you need to follow symlinks too use {@link #delete(Action)}.
      *
      * @param paths Any type of object accepted by {@link org.gradle.api.Project#files(Object...)}
      * @return true if anything got deleted, false otherwise
      */
     boolean delete(Object... paths);
+
+    /**
+     * Deletes the specified files.  The given action is used to configure a {@link DeleteSpec}, which is then used to
+     * delete the files.
+     * <p>Example:
+     * <pre>
+     * project.delete {
+     *     delete 'somefile'
+     *     followSymlinks = true
+     * }
+     * </pre>
+     *
+     * @param action Action to configure the DeleteSpec
+     * @return {@link WorkResult} that can be used to check if delete did any work.
+     */
+    WorkResult delete(Action<? super DeleteSpec> action);
 
     /**
      * Executes a Java main class. The closure configures a {@link org.gradle.process.JavaExecSpec}.
@@ -913,12 +867,34 @@ public interface Project extends Comparable<Project>, ExtensionAware, PluginAwar
     ExecResult javaexec(Closure closure);
 
     /**
+     * Executes an external Java process.
+     * <p>
+     * The given action configures a {@link org.gradle.process.JavaExecSpec}, which is used to launch the process.
+     * This method blocks until the process terminates, with its result being returned.
+     *
+     * @param action The action for configuring the execution.
+     * @return the result of the execution
+     */
+    ExecResult javaexec(Action<? super JavaExecSpec> action);
+
+    /**
      * Executes an external command. The closure configures a {@link org.gradle.process.ExecSpec}.
      *
      * @param closure The closure for configuring the execution.
      * @return the result of the execution
      */
     ExecResult exec(Closure closure);
+
+    /**
+     * Executes an external command.
+     * <p>
+     * The given action configures a {@link org.gradle.process.ExecSpec}, which is used to launch the process.
+     * This method blocks until the process terminates, with its result being returned.
+     *
+     * @param action The action for configuring the execution.
+     * @return the result of the execution
+     */
+    ExecResult exec(Action<? super ExecSpec> action);
 
     /**
      * <p>Converts a name to an absolute project path, resolving names relative to this project.</p>
@@ -1189,25 +1165,59 @@ public interface Project extends Comparable<Project>, ExtensionAware, PluginAwar
      *
      * <li>If this project object has a property with the given name, return the value of the property.</li>
      *
+     * <li>If this project has an extension with the given name, return the extension.</li>
+     *
      * <li>If this project's convention object has a property with the given name, return the value of the
      * property.</li>
      *
-     * <li>If this project has an additional property with the given name, return the value of the property.</li>
+     * <li>If this project has an extra property with the given name, return the value of the property.</li>
      *
      * <li>If this project has a task with the given name, return the task.</li>
      *
-     * <li>Search up through this project's ancestor projects for a convention property or additional property with the
+     * <li>Search up through this project's ancestor projects for a convention property or extra property with the
      * given name.</li>
      *
-     * <li>If not found, throw {@link MissingPropertyException}</li>
+     * <li>If not found, a {@link MissingPropertyException} is thrown.</li>
      *
      * </ol>
      *
      * @param propertyName The name of the property.
      * @return The value of the property, possibly null.
      * @throws MissingPropertyException When the given property is unknown.
+     * @see Project#findProperty(String)
      */
     Object property(String propertyName) throws MissingPropertyException;
+
+    /**
+     * <p>Returns the value of the given property or null if not found.
+     * This method locates a property as follows:</p>
+     *
+     * <ol>
+     *
+     * <li>If this project object has a property with the given name, return the value of the property.</li>
+     *
+     * <li>If this project has an extension with the given name, return the extension.</li>
+     *
+     * <li>If this project's convention object has a property with the given name, return the value of the
+     * property.</li>
+     *
+     * <li>If this project has an extra property with the given name, return the value of the property.</li>
+     *
+     * <li>If this project has a task with the given name, return the task.</li>
+     *
+     * <li>Search up through this project's ancestor projects for a convention property or extra property with the
+     * given name.</li>
+     *
+     * <li>If not found, null value is returned.</li>
+     *
+     * </ol>
+     *
+     * @param propertyName The name of the property.
+     * @return The value of the property, possibly null or null if not found.
+     * @see Project#property(String)
+     */
+    @Incubating
+    Object findProperty(String propertyName);
 
     /**
      * <p>Returns the logger for this project. You can use this in your build file to write log messages.</p>
@@ -1323,14 +1333,6 @@ public interface Project extends Comparable<Project>, ExtensionAware, PluginAwar
     void dependencies(Closure configureClosure);
 
     /**
-     * Returns the plugins container for this project. The returned container can be used to manage the plugins which
-     * are used by this project.
-     *
-     * @return the plugin container. Never returns null.
-     */
-    PluginContainer getPlugins();
-
-    /**
      * Returns the build script handler for this project. You can use this handler to query details about the build
      * script for this project, and manage the classpath used to compile and execute the project's build script.
      *
@@ -1381,34 +1383,48 @@ public interface Project extends Comparable<Project>, ExtensionAware, PluginAwar
      * Creates a {@link CopySpec} which can later be used to copy files or create an archive. The given closure is used
      * to configure the {@link CopySpec} before it is returned by this method.
      *
+     * <pre autoTested=''>
+     * def baseSpec = copySpec {
+     *    from "source"
+     *    include "**&#47;*.java"
+     * }
+     *
+     * task copy(type: Copy) {
+     *    into "target"
+     *    with baseSpec
+     * }
+     * </pre>
+     *
      * @param closure Closure to configure the CopySpec
      * @return The CopySpec
      */
     CopySpec copySpec(Closure closure);
 
     /**
-     * <p>Configures this project using plugins or scripts. The given closure is used to configure an {@link
-     * org.gradle.api.plugins.ObjectConfigurationAction} which is then used to configure this project.</p>
-     *
-     * @param closure The closure to configure the {@code ObjectConfigurationAction}.
+     * Copies the specified files.  The given action is used to configure a {@link CopySpec}, which is then used to
+     * copy the files.
+     * @see #copy(Closure)
+     * @param action Action to configure the CopySpec
+     * @return {@link WorkResult} that can be used to check if the copy did any work.
      */
-    void apply(Closure closure);
+    WorkResult copy(Action<? super CopySpec> action);
 
     /**
-     * <p>Configures this project using plugins or scripts. The following options are available:</p>
+     * Creates a {@link CopySpec} which can later be used to copy files or create an archive. The given action is used
+     * to configure the {@link CopySpec} before it is returned by this method.
      *
-     * <ul><li>{@code from}: A script to apply to the project. Accepts any path supported by {@link #uri(Object)}.</li>
-     *
-     * <li>{@code plugin}: The id or implementation class of the plugin to apply to the project.</li>
-     *
-     * <li>{@code to}: The target delegate object or objects. Use this to configure objects other than the
-     * project.</li></ul>
-     *
-     * <p>For more detail, see {@link org.gradle.api.plugins.ObjectConfigurationAction}.</p>
-     *
-     * @param options The options to use to configure the {@code ObjectConfigurationAction}.
+     * @see #copySpec(Closure)
+     * @param action Action to configure the CopySpec
+     * @return The CopySpec
      */
-    void apply(Map<String, ?> options);
+    CopySpec copySpec(Action<? super CopySpec> action);
+
+    /**
+     * Creates a {@link CopySpec} which can later be used to copy files or create an archive.
+     *
+     * @return a newly created copy spec
+     */
+    CopySpec copySpec();
 
     /**
      * Returns the evaluation state of this project. You can use this to access information about the evaluation of this

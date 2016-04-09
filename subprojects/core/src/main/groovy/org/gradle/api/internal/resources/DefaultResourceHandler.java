@@ -16,34 +16,32 @@
 
 package org.gradle.api.internal.resources;
 
-import org.gradle.api.internal.file.FileResolver;
-import org.gradle.api.internal.file.MaybeCompressedFileResource;
+import org.gradle.api.internal.file.FileOperations;
+import org.gradle.api.internal.file.TemporaryFileProvider;
 import org.gradle.api.internal.file.archive.compression.Bzip2Archiver;
 import org.gradle.api.internal.file.archive.compression.GzipArchiver;
-import org.gradle.api.resources.ReadableResource;
 import org.gradle.api.resources.ResourceHandler;
+import org.gradle.api.resources.TextResourceFactory;
+import org.gradle.api.resources.internal.ReadableResourceInternal;
 
 public class DefaultResourceHandler implements ResourceHandler {
-    private final FileResolver resolver;
+    private final FileOperations fileOperations;
+    private final TextResourceFactory textResourceFactory;
 
-    public DefaultResourceHandler(FileResolver resolver) {
-        this.resolver = resolver;
+    public DefaultResourceHandler(FileOperations fileOperations, TemporaryFileProvider tempFileProvider) {
+        this.fileOperations = fileOperations;
+        textResourceFactory = new DefaultTextResourceFactory(fileOperations, tempFileProvider);
     }
 
-    public ReadableResource gzip(Object path) {
-        return new GzipArchiver(resolver.resolveResource(path));
+    public ReadableResourceInternal gzip(Object path) {
+        return new GzipArchiver(fileOperations.getFileResolver().resolveResource(path));
     }
 
-    public ReadableResource bzip2(Object path) {
-        return new Bzip2Archiver(resolver.resolveResource(path));
+    public ReadableResourceInternal bzip2(Object path) {
+        return new Bzip2Archiver(fileOperations.getFileResolver().resolveResource(path));
     }
 
-    //this method is not on the interface, at least for now
-    public ReadableResource maybeCompressed(Object tarPath) {
-        if (tarPath instanceof ReadableResource) {
-            return (ReadableResource) tarPath;
-        } else {
-            return new MaybeCompressedFileResource(resolver.resolveResource(tarPath));
-        }
+    public TextResourceFactory getText() {
+        return textResourceFactory;
     }
 }

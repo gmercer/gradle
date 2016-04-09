@@ -16,8 +16,10 @@
 
 package org.gradle.integtests
 
+import org.gradle.api.JavaVersion
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.executer.GradleExecuter
+import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.test.fixtures.server.http.HttpServer
 import org.gradle.test.fixtures.server.http.TestProxyServer
 import org.gradle.util.GradleVersion
@@ -27,9 +29,10 @@ import static org.gradle.test.matchers.UserAgentMatcher.matchesNameAndVersion
 import static org.hamcrest.Matchers.containsString
 import static org.junit.Assert.assertThat
 
+@LeaksFileHandles
 class WrapperHttpIntegrationTest extends AbstractIntegrationSpec {
     @Rule HttpServer server = new HttpServer()
-    @Rule TestProxyServer proxyServer = new TestProxyServer(server)
+    @Rule TestProxyServer proxyServer = new TestProxyServer()
 
     void setup() {
         assert distribution.binDistribution.exists(): "bin distribution must exist to run this test, you need to run the :distributions:binZip task"
@@ -104,10 +107,11 @@ class WrapperHttpIntegrationTest extends AbstractIntegrationSpec {
     public void "downloads wrapper via proxy"() {
         given:
         proxyServer.start()
-        prepareWrapper("http://not.a.real.domain")
+        prepareWrapper(server.uri.toString())
         file("gradle.properties") << """
     systemProp.http.proxyHost=localhost
     systemProp.http.proxyPort=${proxyServer.port}
+    systemProp.http.nonProxyHosts=${JavaVersion.current() >= JavaVersion.VERSION_1_7 ? '' : '~localhost'}
 """
         server.expectGet("/gradlew/dist", distribution.binDistribution)
 
@@ -123,15 +127,15 @@ class WrapperHttpIntegrationTest extends AbstractIntegrationSpec {
 
     public void "downloads wrapper via authenticated proxy"() {
         given:
-        proxyServer.start()
-        proxyServer.requireAuthentication('my_user', 'my_password')
+        proxyServer.start('my_user', 'my_password')
 
         and:
-        prepareWrapper("http://not.a.real.domain")
+        prepareWrapper(server.uri.toString())
         server.expectGet("/gradlew/dist", distribution.binDistribution)
         file("gradle.properties") << """
     systemProp.http.proxyHost=localhost
     systemProp.http.proxyPort=${proxyServer.port}
+    systemProp.http.nonProxyHosts=${JavaVersion.current() >= JavaVersion.VERSION_1_7 ? '' : '~localhost'}
     systemProp.http.proxyUser=my_user
     systemProp.http.proxyPassword=my_password
 """

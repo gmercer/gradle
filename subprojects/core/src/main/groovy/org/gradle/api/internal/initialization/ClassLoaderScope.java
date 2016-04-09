@@ -21,69 +21,80 @@ import org.gradle.internal.classpath.ClassPath;
 /**
  * Represents a particular node in the ClassLoader graph.
  *
- * Certain domain objects (e.g. Gradle, Settings, Project) have an associated class loader scope.
- * This is used for evaluating associated scripts and script plugins.
+ * Certain domain objects (e.g. Gradle, Settings, Project) have an associated class loader scope. This is used for evaluating associated scripts and script plugins.
  *
- * Use of this class allows class loader creation to be lazy, and potentially optimised.
- * It also provides a central location for class loader reuse.
+ * Use of this class allows class loader creation to be lazy, and potentially optimised. It also provides a central location for class loader reuse.
  */
 public interface ClassLoaderScope {
 
     /**
-     * The effective class loader for this scope.
-     *
-     * It is strongly preferable to only call this after {@link #lock()}ing the scope as it allows the structure to be optimized.
+     * The classloader for use at this node.
+     * <p>
+     * Contains exported classes of the parent scope and all local and exported additions to this scope.
+     * It is strongly preferable to only call this after {@link #lock() locking} the scope as it allows the structure to be optimized.
      */
-    ClassLoader getScopeClassLoader();
+    ClassLoader getLocalClassLoader();
 
     /**
-     * The class loader that children inherit.
+     * The classloader for use by child nodes.
+     * <p>
+     * Contains exported classes of the parent scope and all local and exported additions to this scope.
+     * It is strongly preferable to only call this after {@link #lock() locking} the scope as it allows the structure to be optimized.
      */
-    ClassLoader getChildClassLoader();
+    ClassLoader getExportClassLoader();
 
     /**
-     * The base scope defines the parent for local additions.
+     * The parent of this scope.
      */
-    ClassLoaderScope getBase();
+    ClassLoaderScope getParent();
 
     /**
-     * Adds a class path visible to this scope, but not to children. The class path is loaded such that the exported classes of the base scope are visible to it.
-     * In this way, local classes are effectively the private classes of the scope.
+     * Returns true if this scope defines the given Class. That is, the class is local and/or exported by this scope and not inherited from
+     * some parent.
+     */
+    boolean defines(Class<?> clazz);
+
+    /**
+     * Makes the provided classes visible to this scope, but not to children. The classes are loaded in their own ClassLoader whose parent is the export
+     * ClassLoader of the parent scope.
      *
      * <p>Can not be called after being locked.
+     *
+     * @return this
      */
-    ClassLoader addLocal(ClassPath classpath);
+    ClassLoaderScope local(ClassPath classPath);
 
     /**
-     * Adds a class path visible to this scope and all children. The class path is loaded such that the exported classes of the parent scope are visible to it.
-     * In this way, exported classes are effectively the public classes of the scope.
+     * Makes the provided classes visible to this scope and its children. The classes are loaded in their own ClassLoader whose parent is the export ClassLoader
+     * of the parent scope.
      *
      * <p>Can not be called after being locked.
-     */
-    ClassLoader export(ClassPath classpath);
-
-    /**
-     * Creates a scope with the same parent and base as this scope.
-     */
-    ClassLoaderScope createSibling();
-
-    /**
-     * Creates a scope with this scope as parent. Uses the same base as this scope.
      *
-     * Local classes added to the return child will NOT inherit from the exported classes of this and parents. Exported classes WILL inherit from
-     * the exported classes of this scope and its parent.
+     * @return this
      */
-    ClassLoaderScope createChild();
+    ClassLoaderScope export(ClassPath classPath);
 
     /**
-     * Creates a scope with this scope as parent and base.
+     * Makes the provided classes visible to this scope and its children. The classes are loaded in their own ClassLoader whose parent is the export ClassLoader
+     * of the parent scope.
      *
-     * Both local classes and exported classes added to the return child WILL inherit from the exported classpath of this and parents.
+     * <p>Can not be called after being locked.
+     *
+     * @return this
      */
-    ClassLoaderScope createRebasedChild();
+    ClassLoaderScope export(ClassLoader classLoader);
+
+    /**
+     * Creates a scope with this scope as parent.
+     *
+     * @param id an identifier for the child loader
+     */
+    ClassLoaderScope createChild(String id);
 
     /**
      * Signal that no more modifications are to come, allowing the structure to be optimised if possible.
+     *
+     * @return this
      */
     ClassLoaderScope lock();
 

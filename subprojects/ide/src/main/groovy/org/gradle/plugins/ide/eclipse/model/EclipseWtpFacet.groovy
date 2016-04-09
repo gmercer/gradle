@@ -71,7 +71,6 @@ class EclipseWtpFacet {
      * For examples see docs for {@link EclipseWtpFacet}
      */
     List<Facet> facets = []
-    // TODO: What's the difference between fixed and installed facets? Why do we only model the latter?
 
     /**
      * Adds a facet.
@@ -81,7 +80,7 @@ class EclipseWtpFacet {
      * @param args A map that must contain a 'name' and 'version' key with corresponding values.
      */
     void facet(Map<String, ?> args) {
-        facets << ConfigureUtil.configureByMap(args, new Facet())
+        facets = getFacets() + ConfigureUtil.configureByMap(args, new Facet())
     }
 
     /**

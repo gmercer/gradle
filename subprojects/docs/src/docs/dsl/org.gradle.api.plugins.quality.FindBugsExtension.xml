@@ -10,7 +10,7 @@
             </thead>
             <tr>
                 <td>toolVersion</td>
-                <td><literal>2.0.1</literal></td>
+                <td><literal>3.0.1</literal></td>
             </tr>
             <tr>
                 <td>reportsDir</td>
@@ -31,6 +31,14 @@
             <tr>
                 <td>omitVisitors</td>
                 <td><literal>[]</literal></td>
+            </tr>
+            <tr>
+                <td>includeFilterConfig</td>
+                <td><literal>null</literal></td>
+            </tr>
+            <tr>
+                <td>excludeFilterConfig</td>
+                <td><literal>null</literal></td>
             </tr>
             <tr>
                 <td>includeFilter</td>

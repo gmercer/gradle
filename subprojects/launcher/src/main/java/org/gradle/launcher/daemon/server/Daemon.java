@@ -18,13 +18,13 @@ package org.gradle.launcher.daemon.server;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.concurrent.CompositeStoppable;
-import org.gradle.internal.concurrent.Stoppable;
 import org.gradle.internal.concurrent.ExecutorFactory;
+import org.gradle.internal.concurrent.Stoppable;
 import org.gradle.launcher.daemon.context.DaemonContext;
 import org.gradle.launcher.daemon.logging.DaemonMessages;
 import org.gradle.launcher.daemon.registry.DaemonRegistry;
 import org.gradle.launcher.daemon.server.exec.DaemonCommandExecuter;
-import org.gradle.messaging.remote.Address;
+import org.gradle.internal.remote.Address;
 
 import java.util.Date;
 import java.util.concurrent.TimeUnit;
@@ -58,7 +58,7 @@ public class Daemon implements Stoppable {
 
     /**
      * Creates a new daemon instance.
-     * 
+     *
      * @param connector The provider of server connections for this daemon
      * @param daemonRegistry The registry that this daemon should advertise itself in
      */
@@ -81,7 +81,7 @@ public class Daemon implements Stoppable {
 
     /**
      * Starts the daemon, receiving connections asynchronously (i.e. returns immediately).
-     * 
+     *
      * @throws IllegalStateException if this daemon is already running, or has already been stopped.
      */
     public void start() {
@@ -122,14 +122,22 @@ public class Daemon implements Stoppable {
             // 3. start accepting incoming connections
             // 4. advertise presence in registry
 
-            stateCoordinator = new DaemonStateCoordinator(onStartCommand, onFinishCommand);
+            stateCoordinator = new DaemonStateCoordinator(executorFactory, onStartCommand, onFinishCommand);
             connectionHandler = new DefaultIncomingConnectionHandler(commandExecuter, daemonContext, stateCoordinator, executorFactory);
-            connectorAddress = connector.start(connectionHandler);
-            LOGGER.debug("Daemon starting at: " + new Date() + ", with address: " + connectorAddress);
+            Runnable connectionErrorHandler = new Runnable() {
+                @Override
+                public void run() {
+                    stateCoordinator.stop();
+                }
+            };
+            connectorAddress = connector.start(connectionHandler, connectionErrorHandler);
+            LOGGER.debug("Daemon starting at: {}, with address: {}", new Date(), connectorAddress);
             registryUpdater.onStart(connectorAddress);
         } finally {
             lifecyleLock.unlock();
         }
+
+        LOGGER.lifecycle(DaemonMessages.PROCESS_STARTED);
     }
 
     /**
@@ -169,10 +177,10 @@ public class Daemon implements Stoppable {
 
     /**
      * Waits for the daemon to be idle for the specified number of milliseconds, then requests that the daemon stop.
-     * 
-     * @throws DaemonStoppedException if the daemon is explicitly stopped instead of idling out.
+     *
+     * <p>May return earlier if the daemon is stopped before the idle timeout is reached.</p>
      */
-    public void requestStopOnIdleTimeout(int idleTimeout, TimeUnit idleTimeoutUnits) throws DaemonStoppedException {
+    public void requestStopOnIdleTimeout(int idleTimeout, TimeUnit idleTimeoutUnits) {
         LOGGER.debug("requestStopOnIdleTimeout({} {}) called on daemon", idleTimeout, idleTimeoutUnits);
         DaemonStateCoordinator stateCoordinator;
         lifecyleLock.lock();

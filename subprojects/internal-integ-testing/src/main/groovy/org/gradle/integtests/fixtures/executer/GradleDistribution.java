@@ -15,6 +15,7 @@
  */
 package org.gradle.integtests.fixtures.executer;
 
+import org.gradle.api.JavaVersion;
 import org.gradle.internal.jvm.Jvm;
 import org.gradle.internal.os.OperatingSystem;
 import org.gradle.test.fixtures.file.TestDirectoryProvider;
@@ -54,11 +55,6 @@ public interface GradleDistribution {
     boolean worksWith(OperatingSystem os);
 
     /**
-     * Returns true if the daemon is supported by this distribution.
-     */
-    boolean isDaemonSupported();
-
-    /**
      * Returns true if the configuring daemon idle timeout feature is supported by this distribution.
      */
     boolean isDaemonIdleTimeoutConfigurable();
@@ -69,9 +65,29 @@ public interface GradleDistribution {
     boolean isToolingApiSupported();
 
     /**
-     * Returns true if the tooling API provider of this distribution correctly handles non-ASCII characters in logging output.
+     * Returns true if the tooling API of this distribution supports the given target JVM.
+     */
+    boolean isToolingApiTargetJvmSupported(JavaVersion javaVersion);
+
+    /**
+     * Returns true if the tooling API of this distribution correctly handles non-ASCII characters in logging output.
      */
     boolean isToolingApiNonAsciiOutputSupported();
+
+    /**
+     * Returns true if the tooling API of this distribution correctly handles logging in embedded mode.
+     */
+    boolean isToolingApiLoggingInEmbeddedModeSupported();
+
+    /**
+     * Returns true if the tooling API of this distribution supports specifying the daemon base dir.
+     */
+    boolean isToolingApiDaemonBaseDirSupported();
+
+    /**
+     * Returns true if the tooling API of this distribution correctly implements progress events when in embedded mode.
+     */
+    boolean isToolingApiEventsInEmbeddedModeSupported();
 
     /**
      * Returns the version of the artifact cache layout
@@ -85,14 +101,13 @@ public interface GradleDistribution {
 
     /**
      * Returns true if the wrapper from this distribution can execute a build using the specified version.
-     * @param version
      */
     boolean wrapperCanExecute(GradleVersion version);
 
     /**
      * Early versions had bugs that prevented any values having spaces in them in GRADLE_OPTS or JAVA_OPTS.
      *
-     * See http://issues.gradle.org/browse/GRADLE-1730
+     * See https://issues.gradle.org/browse/GRADLE-1730
      */
     boolean isSupportsSpacesInGradleAndJavaOpts();
 
@@ -100,4 +115,9 @@ public interface GradleDistribution {
      * The 'ivy' repository was introduced in Milestone-3, but early versions didn't work with spaces in the artifact pattern.
      */
     boolean isFullySupportsIvyRepository();
+
+    /**
+     * Returns true if the wrapper for this version honours the --gradle-user-home command-line option.
+     */
+    boolean isWrapperSupportsGradleUserHomeCommandLineOption();
 }

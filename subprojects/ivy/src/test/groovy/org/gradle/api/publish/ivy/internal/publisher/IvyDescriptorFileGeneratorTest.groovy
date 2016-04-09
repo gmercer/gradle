@@ -15,9 +15,11 @@
  */
 
 package org.gradle.api.publish.ivy.internal.publisher
+
 import org.gradle.api.Action
 import org.gradle.api.XmlProvider
 import org.gradle.api.artifacts.DependencyArtifact
+import org.gradle.api.artifacts.ExcludeRule
 import org.gradle.api.publish.ivy.internal.artifact.DefaultIvyArtifact
 import org.gradle.api.publish.ivy.internal.dependency.DefaultIvyDependency
 import org.gradle.api.publish.ivy.internal.publication.DefaultIvyConfiguration
@@ -27,6 +29,8 @@ import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.util.TextUtil
 import spock.lang.Specification
+
+import javax.xml.namespace.QName
 
 class IvyDescriptorFileGeneratorTest extends Specification {
     TestDirectoryProvider testDirectoryProvider = new TestNameTestDirectoryProvider()
@@ -48,6 +52,7 @@ class IvyDescriptorFileGeneratorTest extends Specification {
             info.@module == "my-name"
             info.@revision == "my-version"
             info.@status.isEmpty()
+            info.@branch.isEmpty()
             configurations.size() == 1
             configurations.conf.isEmpty()
             publications.size() == 1
@@ -77,6 +82,27 @@ class IvyDescriptorFileGeneratorTest extends Specification {
 
         then:
         ivyXml.info.@status == "my-status"
+    }
+
+    def "writes supplied branch"() {
+        when:
+        generator.setBranch("someBranch")
+
+        then:
+        ivyXml.info.@branch == "someBranch"
+    }
+
+    def "writes supplied extra info elements" () {
+        when:
+        generator.setExtraInfo([(ns('foo')): 'fooValue', (ns('bar')): 'barValue'])
+
+        then:
+        ivyXml.info."foo".size() == 1
+        ivyXml.info."foo"[0].namespaceURI() == ns('foo').namespaceURI
+        ivyXml.info."foo"[0].text() == 'fooValue'
+        ivyXml.info."bar".size() == 1
+        ivyXml.info."bar"[0].namespaceURI() == ns('bar').namespaceURI
+        ivyXml.info."bar"[0].text() == 'barValue'
     }
 
     def "writes supplied configurations"() {
@@ -200,6 +226,42 @@ class IvyDescriptorFileGeneratorTest extends Specification {
         }
     }
 
+    def "writes dependency with exclusion"() {
+        def exclude1 = Mock(ExcludeRule) {
+            getGroup() >> 'excludeGroup1'
+            getModule() >> 'excludeModule1'
+        }
+        def exclude2 = Mock(ExcludeRule) {
+            getGroup() >> 'excludeGroup2'
+        }
+        def exclude3 = Mock(ExcludeRule) {
+            getModule() >> 'excludeModule3'
+        }
+
+
+        when:
+        generator.addDependency(new DefaultIvyDependency('dep-group', 'dep-name-1', 'dep-version', "confMappingProject", [], [exclude1, exclude2, exclude3]))
+
+        then:
+        with (ivyXml) {
+            dependencies[0].dependency[0].exclude.size() == 3
+            with (dependencies[0].dependency[0]) {
+                with(exclude[0]) {
+                    it.@org == 'excludeGroup1'
+                    it.@module == 'excludeModule1'
+                }
+                with(exclude[1]) {
+                    it.@org == 'excludeGroup2'
+                    it.@module.isEmpty()
+                }
+                with(exclude[2]) {
+                    it.@org.isEmpty()
+                    it.@module == 'excludeModule3'
+                }
+            }
+        }
+    }
+
     def "applies withXml actions"() {
         when:
         generator.withXml(new Action<XmlProvider>() {
@@ -236,5 +298,9 @@ class IvyDescriptorFileGeneratorTest extends Specification {
         def ivyFile = testDirectoryProvider.testDirectory.file("ivy.xml")
         generator.writeTo(ivyFile)
         return ivyFile
+    }
+
+    private QName ns(String name) {
+        return new QName("http://my.extra.info/${name}", name)
     }
 }

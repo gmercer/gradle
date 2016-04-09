@@ -18,13 +18,11 @@ package org.gradle.api.publish.maven.internal.publication
 import org.gradle.api.Action
 import org.gradle.api.InvalidUserDataException
 import org.gradle.api.Task
-import org.gradle.api.artifacts.DependencyArtifact
-import org.gradle.api.artifacts.ModuleDependency
-import org.gradle.api.artifacts.ProjectDependency
-import org.gradle.api.artifacts.PublishArtifact
+import org.gradle.api.artifacts.*
 import org.gradle.api.internal.artifacts.DefaultModuleVersionIdentifier
 import org.gradle.api.internal.component.SoftwareComponentInternal
 import org.gradle.api.internal.component.Usage
+import org.gradle.api.internal.file.TestFiles
 import org.gradle.api.internal.file.collections.SimpleFileCollection
 import org.gradle.api.publish.internal.ProjectDependencyPublicationResolver
 import org.gradle.api.publish.internal.PublicationInternal
@@ -116,6 +114,42 @@ public class DefaultMavenPublicationTest extends Specification {
         publication.pom.packaging == "ext"
     }
 
+    def "packaging determines main artifact"() {
+        when:
+        def mavenArtifact = Mock(MavenArtifact)
+        notationParser.parseNotation("artifact") >> mavenArtifact
+        mavenArtifact.extension >> "ext"
+        def attachedMavenArtifact = Mock(MavenArtifact)
+        notationParser.parseNotation("attached") >> attachedMavenArtifact
+        attachedMavenArtifact.extension >> "jar"
+
+        and:
+        def publication = createPublication()
+        publication.artifact("artifact")
+        publication.artifact("attached")
+        publication.pom.packaging = "ext"
+
+        then:
+        publication.asNormalisedPublication().mainArtifact.extension == "ext"
+        publication.pom.packaging == "ext"
+    }
+
+    def 'if there is only one artifact it is the main artifact even if packaging is different'() {
+        when:
+        def mavenArtifact = Mock(MavenArtifact)
+        notationParser.parseNotation("artifact") >> mavenArtifact
+        mavenArtifact.extension >> "ext"
+
+        and:
+        def publication = createPublication()
+        publication.artifact("artifact")
+        publication.pom.packaging = "otherext"
+
+        then:
+        publication.asNormalisedPublication().mainArtifact.extension == "ext"
+        publication.pom.packaging == "otherext"
+    }
+
     def "empty publishableFiles and artifacts when no component is added"() {
         when:
         def publication = createPublication()
@@ -160,12 +194,15 @@ public class DefaultMavenPublicationTest extends Specification {
         def publication = createPublication()
         def moduleDependency = Mock(ModuleDependency)
         def artifact = Mock(DependencyArtifact)
+        def excludeRule = Mock(ExcludeRule)
 
         when:
         moduleDependency.group >> "group"
         moduleDependency.name >> "name"
         moduleDependency.version >> "version"
         moduleDependency.artifacts >> [artifact]
+        moduleDependency.excludeRules >> [excludeRule]
+        moduleDependency.transitive >> true
 
         and:
         publication.from(componentWithDependency(moduleDependency))
@@ -177,6 +214,39 @@ public class DefaultMavenPublicationTest extends Specification {
             artifactId == "name"
             version == "version"
             artifacts == [artifact]
+            excludeRules == [excludeRule]
+        }
+    }
+
+    def "adopts non-transitive module dependency from added component"() {
+        given:
+        def publication = createPublication()
+        def moduleDependency = Mock(ModuleDependency)
+        def artifact = Mock(DependencyArtifact)
+        def excludeRule = Mock(ExcludeRule)
+
+        when:
+        moduleDependency.group >> "group"
+        moduleDependency.name >> "name"
+        moduleDependency.version >> "version"
+        moduleDependency.artifacts >> [artifact]
+        moduleDependency.excludeRules >> [excludeRule]
+        moduleDependency.transitive >> false
+
+        and:
+        publication.from(componentWithDependency(moduleDependency))
+
+        then:
+        publication.runtimeDependencies.size() == 1
+        with (publication.runtimeDependencies.asList().first()) {
+                groupId == "group"
+                artifactId == "name"
+                version == "version"
+                artifacts == [artifact]
+                excludeRules != [excludeRule]
+                excludeRules.size() == 1
+                excludeRules[0].group == '*'
+                excludeRules[0].module == '*'
         }
     }
 
@@ -186,6 +256,7 @@ public class DefaultMavenPublicationTest extends Specification {
         def projectDependency = Mock(ProjectDependency)
 
         and:
+        projectDependency.excludeRules >> []
         projectDependencyResolver.resolve(projectDependency) >> DefaultModuleVersionIdentifier.newId("pub-group", "pub-name", "pub-version")
 
         when:
@@ -283,7 +354,7 @@ public class DefaultMavenPublicationTest extends Specification {
     }
 
     def createPublication() {
-        def publication = new DefaultMavenPublication("pub-name", module, notationParser, new DirectInstantiator(), projectDependencyResolver)
+        def publication = new DefaultMavenPublication("pub-name", module, notationParser, DirectInstantiator.INSTANCE, projectDependencyResolver, TestFiles.fileCollectionFactory())
         publication.setPomFile(new SimpleFileCollection(pomFile))
         return publication;
     }

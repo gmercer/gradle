@@ -25,7 +25,7 @@ class AntlrPluginTest extends Specification {
 
     def addsAntlrPropertiesToEachSourceSet() {
         when:
-        project.apply plugin: AntlrPlugin
+        project.pluginManager.apply(AntlrPlugin)
 
         then:
         def main = project.sourceSets.main
@@ -41,10 +41,10 @@ class AntlrPluginTest extends Specification {
         def custom = project.sourceSets.custom
         custom.antlr.srcDirs == [project.file('src/custom/antlr')] as Set
     }
-    
+
     def addsTaskForEachSourceSet() {
         when:
-        project.apply plugin: AntlrPlugin
+        project.pluginManager.apply(AntlrPlugin)
 
         then:
         def main = project.tasks.generateGrammarSource
@@ -63,4 +63,5 @@ class AntlrPluginTest extends Specification {
         custom instanceof AntlrTask
         project.tasks.compileCustomJava.taskDependencies.getDependencies(null).contains(custom)
     }
+
 }

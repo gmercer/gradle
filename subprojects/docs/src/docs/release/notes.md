@@ -2,250 +2,27 @@
 
 Here are the new features introduced in this Gradle release.
 
-### Groovy 2.2.2
+<!--
+IMPORTANT: if this is a patch release, ensure that a prominent link is included in the foreword to all releases of the same minor stream.
+Add-->
 
-Upgraded to Groovy 2.2.2 for running build scripts and plugins.
+### Set the character set used for filtering files in CopySpec
 
-### New API for artifact resolution (i)
+By default, file filtering using `CopySpec` uses the default platform character set to read and write filtered files.
+This can cause problems if, for example, the files are encoded using `UTF-8` but the default platform character set is another one.
 
-Gradle 2.0 introduces a new, incubating API for resolving component artifacts. With this addition, Gradle now offers separate dedicated APIs for resolving
-components and artifacts. (Component resolution is mainly concerned with computing the dependency graph, whereas artifact resolution is
-mainly concerned with locating and downloading artifacts.) The entry points to the component and artifact resolution APIs are `configuration.incoming` and
-`dependencies.createArtifactResolutionQuery()`, respectively.
+You can now define the character set to use when reading and writing filtered files per `CopySpec`, e.g.:
 
-TODO: This API examples are out of date. Add new tested samples to the Javadoc or Userguide and link instead
-
-Here is an example usage of the new API:
-
-    def query = dependencies.createArtifactResolutionQuery()
-        .forComponent("org.springframework", "spring-core", "3.2.3.RELEASE")
-        .forArtifacts(JvmLibrary)
-
-    def result = query.execute() // artifacts are downloaded at this point
-
-    for (component in result.components) {
-        assert component instanceof JvmLibrary
-        println component.id
-        component.sourceArtifacts.each { println it.file }
-        component.javadocArtifacts.each { println it.file }
+    task filter(type: Copy) {
+        from 'some/place'
+        into 'somewhere/else'
+        expand(version: project.version)
+        filteringCharset = 'UTF-8'
     }
 
-    assert result.unresolvedComponents.isEmpty()
+See the “[Filtering files](userguide/working_with_files.html#sec:filtering_files)” section of the “Working with files chapter” in the user guide for more information and examples of using this new feature.
 
-Artifact resolution can be limited to selected artifact types:
-
-    def query = dependencies.createArtifactResolutionQuery()
-        .forComponent("org.springframework", "spring-core", "3.2.3.RELEASE")
-        .forArtifacts(JvmLibrary, JvmLibrarySourcesArtifact)
-
-    def result = query.execute()
-
-    for (component in result.components) {
-        assert !component.sourceArtifacts.isEmpty()
-        assert component.javadocArtifacts.isEmpty()
-    }
-
-Artifacts for many components can be resolved together:
-
-    def query = dependencies.createArtifactResolutionQuery()
-        .forComponents(setOfComponentIds)
-        .forArtifacts(JvmLibrary)
-
-So far, only one component type (`JvmLibrary`) is available, but others will follow, also for platforms other than the JVM.
-
-### Accessing Ivy extra info from component metadata rules
-
-It's now possible to access Ivy extra info from component metadata rules. Roughly speaking, Ivy extra info is a set of user-defined
-key-value pairs published in the Ivy module descriptor. Rules wishing to access the extra info need to specify a parameter of type
-`IvyModuleDescriptor`. Here is an example:
-
-    dependencies {
-        components {
-            eachComponent { component, IvyModuleDescriptor descriptor ->
-                println descriptor.extraInfo["expired"] // TODO: what's a real-world use case?
-            }
-        }
-    }
-
-### Cleaner build scripts with `plugins.withId`
-
-New <a href="javadoc/org/gradle/api/plugins/PluginContainer.html#withId(java.lang.String, org.gradle.api.Action)">plugins.withId()</a>
-enables referring to plugins more conveniently.
-In previous releases, some times it was necessary for the client of a custom plugin to know the fully qualified type of the plugin:
-
-    import com.my.custom.InterestingPlugin
-    plugins.withType(InterestingPlugin) { ...
-
-    //now possible, given InterestingPlugin uses "interesting-plugin" id:
-    plugins.withId("interesting-plugin") { ...
-
-Benefits of the new API for the users:
-
-* less pressure to know the exact java class of the plugin
-* build scripts are more likely to be decoupled from the plugin types (e.g. it's easier for plugin author to refactor/change the type)
-* some build scripts are cleaner and more consistent because plugins are applied by 'id' and are also filtered by 'id'
-
-### Support for Ivy and Maven repositories with SFTP scheme
-
-In addition to `file`, `http` and `https`, Ivy and Maven repositories now also support the `sftp` transport scheme. Currently, authentication with the SFTP server only works based on
-providing username and password credentials.
-
-Here is an example usage of resolving dependencies from a SFTP server with Ivy:
-
-    apply plugin: 'java'
-
-    repositories {
-        ivy {
-            url 'sftp://127.0.0.1:22/repo'
-            credentials {
-                username 'sftp'
-                password 'sftp'
-            }
-            layout 'maven'
-        }
-    }
-
-    dependencies {
-        compile 'org.apache.commons:commons-lang3:3.3.1'
-    }
-
-Resolving dependencies from a SFTP server with Maven works accordingly. Publishing is not supported yet. The following example demonstrates the use case:
-
-    apply plugin: 'java'
-
-    repositories {
-        maven {
-            url 'sftp://127.0.0.1:22/repo'
-            credentials {
-                username 'sftp'
-                password 'sftp'
-            }
-        }
-    }
-
-    dependencies {
-        compile 'org.apache.commons:commons-lang3:3.3.1'
-    }
-
-Here is an example usage of publishing an artifact to an Ivy repository hosted on a SFTP server:
-
-    apply plugin: 'java'
-    apply plugin: 'ivy-publish'
-
-    version = '2'
-    group = 'org.group.name'
-
-    publishing {
-        repositories {
-            ivy {
-                url 'sftp://127.0.0.1:22/repo'
-                credentials {
-                    username 'sftp'
-                    password 'sftp'
-                }
-                layout 'maven'
-            }
-        }
-        publications {
-            ivy(IvyPublication) {
-                from components.java
-            }
-        }
-    }
-
-
-### Consumed Apache Maven POM profile activation through absence of system property
-
-On top of the support for POM profiles that [are active by default](http://books.sonatype.com/mvnref-book/reference/profiles-sect-activation.html), a profile also becomes active if the
-corresponding system property is _not_ set. The following POM file demonstrates such a use case:
-
-    <project>
-        ...
-        <profiles>
-            <profile>
-                <id>profile-1</id>
-                <property>
-                    <name>!env</name>
-                </property>
-            </profile>
-        </profiles>
-    </project>
-
-### Allow control of the exact set of arguments passed to a toolchain executable
-
-Gradle now provides a 'hook' allowing the build author to control the exact set of arguments passed a toolchain executable.
-This will allow a build author to work around any limitations in Gradle, or incorrect assumptions that Gradle makes.
-
-    apply plugin:'cpp'
-
-    model {
-        toolChains {
-            visualCpp(VisualCpp) {
-                cppCompiler.withArguments { args ->
-                    args << "-DFRENCH"
-                }
-            }
-            clang(Clang){
-                cCompiler.withArguments { args ->
-                    Collections.replaceAll(args, "CUSTOM", "-DFRENCH")
-                }
-                linker.withArguments { args ->
-                    args.remove "CUSTOM"
-                }
-                staticLibArchiver.withArguments { args ->
-                    args.remove "CUSTOM"
-                }
-            }
-
-        }
-    }
-
-### Support for adding target platform specific configurations in native binary projects (Gcc based toolchains)
-
-When declaring a toolchain, the targetted platforms can be configured directly in the toolChain model. Furthermore target platform specific configurations
-can be declared:
-
-	model {
-	    toolChains {
-	        gcc(Gcc) {
-	            target("arm"){
-	                cppCompiler.executable = "custom-gcc"
-	                cppCompiler.withArguments { args ->
-	                    args << "-m32"
-	                }
-	                linker.withArguments { args ->
-	                    args << "-m32"
-	                }
-	            }
-	            target("sparc")
-	        }
-	    }
-		platforms {
-			arm {
-		    	architecture "arm"
-			}
-			sparc {
-		    	architecture "sparc"
-			}
-		}
-
-### New 'ivy' layout support for Ivy repositories
-
-When defining an 'ivy' repository, you can provide a named layout to describe how artifacts are organised within that repository.
-
-In addition to the 'gradle' (default) and 'maven' layouts, you can now specify the 'ivy' layout which tells Gradle that your repository
-is configured with the default ivy artifact and metadata patterns.
-
-    repositories {
-        ivy {
-            url 'http://my.server/repo'
-            layout 'ivy'
-        }
-    }
-
-See the [User Guide](userguide/dependency_management.html#N150B8) and the
-<a href="dsl/org.gradle.api.artifacts.repositories.IvyArtifactRepository.html#org.gradle.api.artifacts.repositories.IvyArtifactRepository:layout(java.lang.String, groovy.lang.Closure)">
-DSL Reference</a> for more detail on how to use named layouts.
+This was contributed by [Jean-Baptiste Nizet](https://github.com/jnizet).
 
 ## Promoted features
 
@@ -265,141 +42,53 @@ The following are the features that have been promoted in this Gradle release.
 Features that have become superseded or irrelevant due to the natural evolution of Gradle become *deprecated*, and scheduled to be removed
 in the next major Gradle version (Gradle 3.0). See the User guide section on the “[Feature Lifecycle](userguide/feature_lifecycle.html)” for more information.
 
-The following are the newly deprecated items in this Gradle release. If you have concerns about a deprecation, please raise it via the [Gradle Forums](http://forums.gradle.org).
+The following are the newly deprecated items in this Gradle release. If you have concerns about a deprecation, please raise it via the [Gradle Forums](http://discuss.gradle.org).
 
-<!--
-### Example deprecation
--->
+### Support for running Gradle on Java 6
+
+Running Gradle using Java 6 is now deprecated, and support will be removed in Gradle 3.0.
+
+It will continue to be possible to build JVM based projects for Java 6, by running Gradle using Java 7 and configuring Gradle to use Java 6 to compile, test and run your code.
 
 ## Potential breaking changes
 
-### Upgraded to Groovy 2.2.2
+### Gradle implementation dependencies are not visible to plugins at development time
 
-Gradle now uses Groovy 2.2.2 to compile and run scripts and plugins. Generally, this should be backwards compatible. However, this change may require
-that you recompile some plugins and may also require some source changes.
+Implementing a Gradle plugin requires the declaration of `gradleApi()`
+to the `compile` configuration. The resolved dependency encompasses the
+entire Gradle runtime including Gradle's third party dependencies
+(e.g. Guava). Any third party dependencies declared by the plugin might
+conflict with the ones pulled in by the `gradleApi()` declaration. Gradle
+does not apply conflict resolution. As a result The user will end up with
+two addressable copies of a dependency on the compile classpath and in
+ the test runtime classpath.
 
-### Custom TestNG listeners are applied before Gradle's listeners
+In previous versions of Gradle the dependency `gradleTestKit()`, which
+relies on a Gradle runtime, attempts to address this problem via class
+relocation. The use of `gradleApi()` and `gradleTestKit()` together
+became unreliable as classes of duplicate name but of different content
+were added to the classpath.
 
-This way the custom listeners are more robust because they can affect the test status.
-There should be no impact of this change because majority of users do not employ custom listeners
-and even if they do healthy listeners will work correctly regardless of the listeners' order.
-
-### Support for reading or changing file permissions on certain platforms with Java 5 or 6
-
-Gradle previously supported file permissions on Solaris and Linux ia-64 using Java 5 and Java 6. This support has
-been removed. You will receive a warning when attempting to use file permissions on these platforms.
-
-Note that file permissions are supported on these platforms when you use Java 7 and later, and is supported for all Java
-versions on Linux, OS X, Windows and FreeBSD for x86 and amd64 architectures.
-
-If you wish to have support for file permissions on other platforms and architectures, please help us out with porting our
-native integration to these platforms.
-
-### Support for terminal integration on certain platforms
-
-Gradle previously supported terminal integration on Solaris and Linux ia-64. This support has been removed. When you use Gradle on these
-platforms, Gradle will fall back to using plain text output.
-
-Note that terminal integration is supported on Linux, OS X, Windows and FreeBSD for x86 and amd64 architectures.
-
-If you wish to have terminal integration on other platforms and architectures, please help us out with porting our
-native integration to these platforms.
-
-### Build scripts must be encoded using UTF-8
-
-Gradle now assumes that all Gradle scripts are encoded using UTF-8. Previously, Gradle assumed the system encoding. This change
-affects all build scripts, settings scripts and init scripts.
-
-### Native binaries model changes
-
-A bunch of changes and renames have been made to the incubating 'native binaries' support.
-
-- Package structure has changed, with many public classes being moved.
-- `Library`, `Executable` and `TestSuite` renamed to `NativeLibrary`, `NativeExecutable` and `NativeTestSuite`
-    - Related binary types have also been renamed
-- `NativeBinariesPlugin` has been renamed to `NativeComponentPlugin` with id `'native-component'`
-- `NativeBinariesModelPlugin` renamed to `NativeComponentModelPlugin`
-
-### New Java component model changes
-
-A bunch of changes and renames have been made to the new, incubating 'java component' support.
-
-- Package structure has changed, with many public classes being moved.
-
-### Support for the Gradle Open API removed
-
-- `GradleRunnerFactory` removed.
-- `UIFactory` removed.
-- `ExternalUtility` removed.
-
-### Removed Deprecated Plugins
-
-- `code-quality` plugin replaced by `checkstyle` and `codenarc`.
-
-### Removed Deprecated Classes
-
-- `GradleLauncher` replaced by the tooling API.
-- `Compile` replaced by `JavaCompile`.
-- `CodeQualityPlugin` replaced by the `checkstyle` and `codenarc` plugins.
-- `GroovyCodeQualityPluginConvention` with no replacement.
-- `JavaCodeQualityPluginConvention` with no replacement.
-- `IllegalOperationAtExecutionTimeException` with no replacement.
-- `AntJavadoc` with no replacement.
-
-### Removed Deprecated Methods
-
-- `CompileOptions.getFailOnError()` replaced with `isFailOnError()`
-- `CompileOptions.getDebug()` replaced with `isDebug()`
-
-### Removed Deprecated Properties
-
-- `CompileOptions.compiler` replaced with `CompileOptions.fork` and `CompileOptions.forkOptions.executable`
-- `CompileOptions.useAnt` with no replacement.
-- `CompileOptions.optimize` with no replacement.
-- `CompileOptions.includeJavaRuntime` with no replacement.
-- `GroovyCompileOptions.useAnt` with no replacement.
-- `GroovyCompileOptions.stacktrace` with no replacement.
-- `GroovyCompileOptions.includeJavaRuntime` with no replacement.
-- `Checkstyle.properties` replaced with `Checkstyle.configProperties`.
-- `Checkstyle.resultFile` replaced with `Checkstyle.reports.xml.destination`.
-- `CodeNarc.reportFormat` replaced with `CodeNarc.reports.<type>.enabled`.
-- `CodeNarc.reportFile` replaced with `CodeNarc.reports.<type>.destination`.
-- `ResolvedArtifact.resolvedDependency` with `ResolvedArtifact.moduleVersion` as a partial replacement.
-
-### Removed incubating method
-
-- `StartParameter.setProjectPath` and `StartParameter.getProjectPath` were replaced with `TaskParameter`.
-
-### Task constructor changes
-
-All task types now have a zero args constructor. The following types are affected:
-
-- `org.gradle.api.tasks.testing.Test`
-- `org.gradle.api.tasks.Upload`
-- `org.gradle.api.plugins.quality.Checkstyle`
-- `org.gradle.api.plugins.quality.CodeNarc`
-- `org.gradle.api.plugins.quality.FindBugs`
-- `org.gradle.api.plugins.quality.Pmd`
-- `org.gradle.api.plugins.quality.JDepend`
-- `org.gradle.testing.jacoco.tasks.JacocoReport`
-- `org.gradle.api.tasks.GradleBuild`
-- `org.gradle.api.tasks.diagnostics.DependencyInsightReportTask`
-- `org.gradle.api.reporting.GenerateBuildDashboard`
-- `org.gradle.api.publish.ivy.tasks.GenerateIvyDescriptor`
-- `org.gradle.api.publish.maven.tasks.GenerateMavenPom`
-- `org.gradle.api.publish.maven.tasks.PublishToMavenRepository`
-- `org.gradle.api.publish.maven.tasks.PublishToMavenLocal`
-- `org.gradle.nativebinaries.tasks.InstallExecutable`
-- `org.gradle.api.plugins.buildcomparison.gradle.CompareGradleBuilds`
+With this version of Gradle proper class relocation has been implemented
+ across the dependencies `gradleApi()`, `gradleTestKit()` and the published
+ Tooling API JAR. Projects using any of those dependencies will not
+ conflict anymore with classes from third party dependencies used by
+ the Gradle runtime. Classes from third-party libraries provided by
+ the Gradle runtime are no longer "visible" at compile and test
+ time.
 
 ## External contributions
 
 We would like to thank the following community members for making contributions to this release of Gradle.
 
-* [Marcin Erdmann](https://github.com/erdi) - Support an ivy repository declared with 'sftp' as the URL scheme
-* [Lukasz Kryger](https://github.com/kryger) - Documentation improvements
-* [Ben McCann](https://github.com/benmccann) - Added named 'ivy' layout to 'ivy' repositories
-* [Alex Selesse](https://github.com/selesse) - Fixed announce plugin in headless mode on OS X
+- [Igor Melnichenko](https://github.com/Myllyenko) - fixed Groovydoc up-to-date checks ([GRADLE-3349](https://issues.gradle.org/browse/GRADLE-3349))
+- [Sandu Turcan](https://github.com/idlsoft) - add wildcard exclusion for non-transitive dependencies in POM ([GRADLE-1574](https://issues.gradle.org/browse/GRADLE-1574))
+- [Jean-Baptiste Nizet](https://github.com/jnizet) - add `filteringCharset` property to `CopySpec` ([GRADLE-1267](https://issues.gradle.org/browse/GRADLE-1267))
+- [Simon Herter](https://github.com/sherter) - add thrown exception to Javadocs for `ExtensionContainer`
+
+<!--
+ - [Some person](https://github.com/some-person) - fixed some issue (GRADLE-1234)
+-->
 
 We love getting contributions from the Gradle community. For information on contributing, please see [gradle.org/contribute](http://gradle.org/contribute).
 

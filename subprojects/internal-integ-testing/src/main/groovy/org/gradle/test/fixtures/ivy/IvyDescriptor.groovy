@@ -27,6 +27,9 @@ class IvyDescriptor {
     String revision
     String status
     String description
+    String branch
+    String resolver
+    Map<QName, String> extraInfo
 
     IvyDescriptor(File ivyFile) {
         def ivy = new XmlParser().parse(ivyFile)
@@ -34,7 +37,14 @@ class IvyDescriptor {
         module = ivy.info[0].@module
         revision = ivy.info[0].@revision
         status = ivy.info[0].@status
+        branch = ivy.info[0].@branch
+        resolver = ivy.info[0].@resolver
         description = ivy.info[0].description[0]?.text()
+
+        extraInfo = [:]
+        ivy.info[0].children().findAll { it.name() instanceof QName }.each {
+            extraInfo[new javax.xml.namespace.QName(it.name().namespaceURI, it.name().localPart)] = it.text()
+        }
 
         ivy.configurations.conf.each {
             configurations[it.@name] = new IvyDescriptorConfiguration(
@@ -62,6 +72,11 @@ class IvyDescriptor {
                     revision: dep.@rev,
                     conf: dep.@conf
             )
+
+            dep.exclude.each { exclude ->
+                ivyDependency.exclusions << new IvyDescriptorDependencyExclusion(org: exclude.@org, module: exclude.@module)
+            }
+
             def key = "${ivyDependency.org}:${ivyDependency.module}:${ivyDependency.revision}"
             dependencies[key] = ivyDependency
         }
@@ -94,5 +109,11 @@ class IvyDescriptor {
             assert dependencies[key].hasConf(conf)
         }
         true
+    }
+
+    IvyDescriptorDependency expectDependency(String key) {
+        final dependency = dependencies.get(key)
+        assert dependency != null : "Could not find expected dependency $key. Actual: ${dependencies.values()}"
+        return dependency
     }
 }

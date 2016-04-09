@@ -57,10 +57,10 @@ import org.gradle.util.ConfigureUtil
  *       sourceDirs += file('someExtraFolder')
  *
  *       //you can alter the files are to be transformed into dependent-module elements:
- *       plusConfigurations += configurations.someInterestingConfiguration
+ *       plusConfigurations += [ configurations.someInterestingConfiguration ]
  *
  *       //or whose files are to be excluded from dependent-module elements:
- *       minusConfigurations += configurations.anotherConfiguration
+ *       minusConfigurations << configurations.anotherConfiguration
  *
  *       //you can add a wb-resource elements; mandatory keys: 'sourcePath', 'deployPath':
  *       //if sourcePath points to non-existing folder it will *not* be added.
@@ -184,7 +184,7 @@ class EclipseWtpComponent {
      * @param args A map that must contain a deployPath and sourcePath key with corresponding values.
      */
     void resource(Map<String, String> args) {
-        resources.add(new WbResource(args.deployPath, args.sourcePath))
+        resources = getResources() + new WbResource(args.deployPath, args.sourcePath)
     }
 
     /**
@@ -202,7 +202,7 @@ class EclipseWtpComponent {
      * @param args A map that must contain a 'name' and 'value' key with corresponding values.
      */
     void property(Map<String, String> args) {
-        properties.add(new WbProperty(args.name, args.value))
+        properties = getProperties() + new WbProperty(args.name, args.value)
     }
 
    /**

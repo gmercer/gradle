@@ -20,6 +20,7 @@ import org.gradle.api.Buildable;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.AntBuilderAware;
 import org.gradle.api.tasks.StopExecutionException;
+import org.gradle.internal.HasInternalProtocol;
 
 import java.io.File;
 import java.util.Set;
@@ -30,6 +31,7 @@ import java.util.Set;
  *
  * <p>You can obtain a {@code FileCollection} instance using {@link org.gradle.api.Project#files}.</p>
  */
+@HasInternalProtocol
 public interface FileCollection extends Iterable<File>, AntBuilderAware, Buildable {
     /**
      * Returns the content of this collection, asserting it contains exactly one file.
@@ -75,13 +77,13 @@ public interface FileCollection extends Iterable<File>, AntBuilderAware, Buildab
     FileCollection plus(FileCollection collection);
 
     /**
-     * <p>Returns a {@code FileCollection} which contains the intersection of this collection and the given collection.
-     * The returned collection is live, and tracks changes to both source collections.</p>
+     * <p>Returns a {@code FileCollection} which contains the difference between this collection and the given
+     * collection. The returned collection is live, and tracks changes to both source collections.</p>
      *
      * <p>You can call this method in your build script using the {@code -} operator.</p>
      *
      * @param collection The other collection. Should not be null.
-     * @return A new collection containing the intersection.
+     * @return A new collection containing the difference.
      */
     FileCollection minus(FileCollection collection);
 

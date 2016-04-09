@@ -20,7 +20,8 @@ import org.gradle.performance.measure.Amount
 import org.gradle.performance.measure.DataAmount
 import org.gradle.performance.measure.Duration
 
-import static org.gradle.performance.fixture.PrettyCalculator.*
+import static org.gradle.performance.fixture.PrettyCalculator.toBytes
+import static org.gradle.performance.fixture.PrettyCalculator.toMillis
 
 class BaselineVersion implements VersionResults {
     final String version
@@ -33,14 +34,10 @@ class BaselineVersion implements VersionResults {
         results.name = "Gradle $version"
     }
 
-    void clearResults() {
-        results.clear()
-    }
-
     String getSpeedStatsAgainst(String displayName, MeasuredOperationList current) {
         def sb = new StringBuilder()
-        def thisVersionAverage = results.executionTime.average
-        def currentVersionAverage = current.executionTime.average
+        def thisVersionAverage = results.totalTime.average
+        def currentVersionAverage = current.totalTime.average
         if (currentVersionAverage > thisVersionAverage) {
             sb.append "Speed $displayName: we're slower than $version.\n"
         } else {
@@ -58,6 +55,7 @@ class BaselineVersion implements VersionResults {
     String getMemoryStatsAgainst(String displayName, MeasuredOperationList current) {
         def sb = new StringBuilder()
         def currentVersionAverage = current.totalMemoryUsed.average
+        assert currentVersionAverage != null
         def thisVersionAverage = results.totalMemoryUsed.average
         if (currentVersionAverage > thisVersionAverage) {
             sb.append("Memory $displayName: we need more memory than $version.\n")
@@ -78,6 +76,6 @@ class BaselineVersion implements VersionResults {
     }
 
     boolean fasterThan(MeasuredOperationList current) {
-        current.executionTime.average - results.executionTime.average > maxExecutionTimeRegression
+        current.totalTime.average - results.totalTime.average > maxExecutionTimeRegression
     }
 }

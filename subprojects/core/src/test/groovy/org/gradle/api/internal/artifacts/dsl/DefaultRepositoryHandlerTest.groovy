@@ -16,19 +16,17 @@
 
 package org.gradle.api.internal.artifacts.dsl
 
-import org.apache.ivy.plugins.resolver.DependencyResolver
 import org.gradle.api.Action
 import org.gradle.api.artifacts.ArtifactRepositoryContainer
 import org.gradle.api.artifacts.repositories.MavenArtifactRepository
 import org.gradle.api.internal.ThreadGlobalInstantiator
 import org.gradle.api.internal.artifacts.BaseRepositoryFactory
 import org.gradle.api.internal.artifacts.DefaultArtifactRepositoryContainerTest
-import org.gradle.api.internal.artifacts.repositories.ArtifactRepositoryInternal
 import org.gradle.internal.reflect.Instantiator
 import org.junit.Test
 
 class DefaultRepositoryHandlerTest extends DefaultArtifactRepositoryContainerTest {
-
+    BaseRepositoryFactory repositoryFactory = Mock()
     DefaultRepositoryHandler handler
 
     def setup() {
@@ -44,7 +42,7 @@ class DefaultRepositoryHandlerTest extends DefaultArtifactRepositoryContainerTes
 
     def testFlatDirWithClosure() {
         given:
-        def repository = Mock(TestFlatDirectoryArtifactRepository)
+        def repository = Mock(TestFlatDirectoryArtifactRepository) { getName() >> "name" }
         1 * repositoryFactory.createFlatDirRepository() >> repository
 
         expect:
@@ -53,7 +51,7 @@ class DefaultRepositoryHandlerTest extends DefaultArtifactRepositoryContainerTes
 
     def testFlatDirWithMap() {
         given:
-        def repository = Mock(TestFlatDirectoryArtifactRepository)
+        def repository = Mock(TestFlatDirectoryArtifactRepository) { getName() >> "name" }
         1 * repositoryFactory.createFlatDirRepository() >> repository
 
         expect:
@@ -62,7 +60,7 @@ class DefaultRepositoryHandlerTest extends DefaultArtifactRepositoryContainerTes
 
     public void testMavenCentralWithNoArgs() {
         when:
-        MavenArtifactRepository repository = Mock(TestMavenArtifactRepository)
+        MavenArtifactRepository repository = Mock(TestMavenArtifactRepository) { getName() >> "name" }
         1 * repositoryFactory.createMavenCentralRepository() >> repository
         repository.getName() >> "name"
 
@@ -72,7 +70,7 @@ class DefaultRepositoryHandlerTest extends DefaultArtifactRepositoryContainerTes
 
     public void testMavenCentralWithMap() {
         when:
-        MavenArtifactRepository repository = Mock(TestMavenArtifactRepository)
+        MavenArtifactRepository repository = Mock(TestMavenArtifactRepository) { getName() >> "name" }
         1 * repositoryFactory.createMavenCentralRepository() >> repository
         1 * repository.setArtifactUrls(["abc"])
         repository.getName() >> "name"
@@ -91,84 +89,18 @@ class DefaultRepositoryHandlerTest extends DefaultArtifactRepositoryContainerTes
         handler.mavenLocal().is(repository)
     }
 
-    def testMavenRepoWithNameAndUrls() {
-        when:
-        String testUrl1 = 'http://www.gradle1.org'
-        String testUrl2 = 'http://www.gradle2.org'
-        String repoRoot = 'http://www.reporoot.org'
-        String repoName = 'mavenRepoName'
-
-        TestMavenArtifactRepository repository = Mock(TestMavenArtifactRepository)
-        repositoryFactory.createMavenRepository() >> repository
-        1 * repository.setName(repoName)
-        1 * repository.setUrl(repoRoot)
-        1 * repository.setArtifactUrls([testUrl1, testUrl2])
-        DependencyResolver resolver = Mock()
-        1 * repositoryFactory.toResolver(repository) >> resolver
-        ArtifactRepositoryInternal fixedRepo = Mock(ArtifactRepositoryInternal)
-        1 * repositoryFactory.createResolverBackedRepository(resolver) >> fixedRepo
-        fixedRepo.getName() >> repoName
-
-        then:
-        handler.mavenRepo([name: repoName, url: repoRoot, artifactUrls: [testUrl1, testUrl2]]).is(resolver)
-        handler.size() == 1
-        handler.first() == fixedRepo
-    }
-
-    @Test
-    public void testMavenRepoWithNameAndRootUrlOnly() {
-        when:
-        String repoRoot = 'http://www.reporoot.org'
-        String repoName = 'mavenRepoName'
-
-        TestMavenArtifactRepository repository = Mock(TestMavenArtifactRepository)
-        repositoryFactory.createMavenRepository() >> repository
-        1 * repository.setName(repoName)
-        1 * repository.setUrl(repoRoot)
-        DependencyResolver resolver = Mock()
-        1 * repositoryFactory.toResolver(repository) >> resolver
-        ArtifactRepositoryInternal fixedRepo = Mock(ArtifactRepositoryInternal)
-        1 * repositoryFactory.createResolverBackedRepository(resolver) >> fixedRepo
-        fixedRepo.getName() >> repoName
-
-        then:
-        handler.mavenRepo([name: repoName, url: repoRoot]).is(resolver)
-        handler.size() == 1
-        handler.first() == fixedRepo
-    }
-
-    @Test
-    public void testMavenRepoWithoutName() {
-        when:
-        String repoRoot = 'http://www.reporoot.org'
-
-        TestMavenArtifactRepository repository = Mock(TestMavenArtifactRepository)
-        repositoryFactory.createMavenRepository() >> repository
-        1 * repository.setUrl(repoRoot)
-        DependencyResolver resolver = Mock()
-        1 * repositoryFactory.toResolver(repository) >> resolver
-        ArtifactRepositoryInternal fixedRepo = Mock(ArtifactRepositoryInternal)
-        1 * repositoryFactory.createResolverBackedRepository(resolver) >> fixedRepo
-        1 * fixedRepo.setName("mavenRepo")
-
-        then:
-        handler.mavenRepo([url: repoRoot]).is(resolver)
-        handler.size() == 1
-        handler.first() == fixedRepo
-    }
-
     public void createIvyRepositoryUsingClosure() {
         when:
-        def repository = Mock(TestIvyArtifactRepository)
+        def repository = Mock(TestIvyArtifactRepository) { getName() >> "name" }
         1 * repositoryFactory.createIvyRepository() >> repository
 
         then:
-        handler.ivy { }.is repository
+        handler.ivy {}.is repository
     }
 
     def createIvyRepositoryUsingAction() {
         when:
-        def repository = Mock(TestIvyArtifactRepository)
+        def repository = Mock(TestIvyArtifactRepository) { getName() >> "name" }
         def action = Mock(Action)
         1 * repositoryFactory.createIvyRepository() >> repository
 
@@ -197,9 +129,9 @@ class DefaultRepositoryHandlerTest extends DefaultArtifactRepositoryContainerTes
         repositoryFactory.createIvyRepository() >>> [repo1, repo2, repo3]
 
         when:
-        handler.ivy { }
-        handler.ivy { }
-        handler.ivy { }
+        handler.ivy {}
+        handler.ivy {}
+        handler.ivy {}
 
         then:
         repo1Name == "ivy"
@@ -209,16 +141,16 @@ class DefaultRepositoryHandlerTest extends DefaultArtifactRepositoryContainerTes
 
     public void createMavenRepositoryUsingClosure() {
         when:
-        MavenArtifactRepository repository = Mock(TestMavenArtifactRepository)
+        MavenArtifactRepository repository = Mock(TestMavenArtifactRepository) { getName() >> "name" }
         1 * repositoryFactory.createMavenRepository() >> repository
 
         then:
-        handler.maven { }.is repository
+        handler.maven {}.is repository
     }
 
     public void createMavenRepositoryUsingAction() {
         when:
-        MavenArtifactRepository repository = Mock(TestMavenArtifactRepository)
+        MavenArtifactRepository repository = Mock(TestMavenArtifactRepository) { getName() >> "name" }
         def action = Mock(Action)
         1 * repositoryFactory.createMavenRepository() >> repository
 

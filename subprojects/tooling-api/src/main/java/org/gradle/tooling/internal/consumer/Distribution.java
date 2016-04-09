@@ -15,13 +15,15 @@
  */
 package org.gradle.tooling.internal.consumer;
 
+import org.gradle.initialization.BuildCancellationToken;
 import org.gradle.internal.classpath.ClassPath;
-import org.gradle.logging.ProgressLoggerFactory;
+import org.gradle.internal.logging.ProgressLoggerFactory;
 
 import java.io.File;
 
 public interface Distribution {
     String getDisplayName();
 
-    ClassPath getToolingImplementationClasspath(ProgressLoggerFactory progressLoggerFactory, File userHomeDir);
+    ClassPath getToolingImplementationClasspath(
+            ProgressLoggerFactory progressLoggerFactory, File userHomeDir, BuildCancellationToken cancellationToken);
 }

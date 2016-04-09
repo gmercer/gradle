@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 package org.gradle.api.plugins.quality
-
+import org.gradle.api.Incubating
 import org.gradle.api.Project
 import org.gradle.api.file.FileCollection
-
+import org.gradle.api.resources.TextResource
 /**
  * Configuration options for the PMD plugin.
  *
@@ -43,6 +43,28 @@ class PmdExtension extends CodeQualityExtension {
      */
     TargetJdk targetJdk
 
+	/**
+     * The rule priority threshold; violations for rules with a lower priority will not be reported.
+     * Default value is 5, which means that all violations will be reported.
+     *
+     * This is equivalent to PMD's Ant task minimumPriority property.
+     * <p>
+     * See the official documentation for the <a href="http://pmd.sourceforge.net/rule-guidelines.html">list of priorities</a>.
+     * </p>
+     * Example: rulePriority = 3
+	 */
+    @Incubating
+	int rulePriority = 5
+
+    /**
+     * Sets the rule priority threshold.
+     */
+    @Incubating
+    void setRulePriority(int intValue) {
+        Pmd.validate(intValue)
+        rulePriority = intValue
+    }
+
     /**
      * Sets the target jdk used with pmd.
      *
@@ -64,6 +86,21 @@ class PmdExtension extends CodeQualityExtension {
     }
 
     /**
+     * The custom rule set to be used (if any). Replaces {@code ruleSetFiles}, except that
+     * it does not currently support multiple rule sets.
+     *
+     * See the
+     * <a href="http://pmd.sourceforge.net/howtomakearuleset.html">official documentation</a>
+     * for how to author a rule set.
+     *
+     * Example: ruleSetConfig = resources.text.fromFile("config/pmd/myRuleSet.xml")
+     *
+     * @since 2.2
+     */
+    @Incubating
+    TextResource ruleSetConfig
+
+    /**
      * The custom rule set files to be used. See the <a href="http://pmd.sourceforge.net/howtomakearuleset.html">official documentation</a> for
      * how to author a rule set file.
      *
@@ -82,4 +119,10 @@ class PmdExtension extends CodeQualityExtension {
     void ruleSetFiles(Object... ruleSetFiles) {
         this.ruleSetFiles.add(project.files(ruleSetFiles))
     }
+
+    /**
+     * Whether or not to write PMD results to {@code System.out}.
+     */
+    @Incubating
+    boolean consoleOutput
 }

@@ -54,6 +54,21 @@
         </varlistentry>
         <varlistentry>
             <term>
+                <option>--console</option>
+            </term>
+            <listitem>
+                <para>Specifies which type of console output to generate.</para>
+                <para>Set to <literal>plain</literal> to generate plain text only. This option disables all color and other rich output in the console output.</para>
+                <para>Set to <literal>auto</literal> (the default) to enable color and other rich output in the console output when
+                    the build process is attached to a console, or to generate plain text only when not attached to a console.</para>
+                <para>Set to <literal>rich</literal> to enable color and other rich output in the console output,
+                    regardless of whether the build process is not attached to a console. When not attached to a console, the build output will use ANSI control
+                    characters to generate the rich output.
+                </para>
+            </listitem>
+        </varlistentry>
+        <varlistentry>
+            <term>
                 <option>--continue</option>
             </term>
             <listitem>
@@ -132,14 +147,6 @@
         </varlistentry>
         <varlistentry>
             <term>
-                <option>--no-color</option>
-            </term>
-            <listitem>
-                <para>Do not use color in the console output.</para>
-            </listitem>
-        </varlistentry>
-        <varlistentry>
-            <term>
                 <option>--offline</option>
             </term>
             <listitem>
@@ -177,12 +184,12 @@
         </varlistentry>
         <varlistentry>
             <term>
-                <option>--parallel-threads (incubating)</option>
+                <option>--max-workers (incubating)</option>
             </term>
             <listitem>
                 <para>
-                    Build projects in parallel, using the specified number of executor threads. For example<literal>--parallel-threads=3</literal>.
-                    This option should only be used with decoupled projects (see <xref linkend="sec:decoupled_projects"/>).
+                    Sets the maximum number of workers that Gradle may use. For example<literal>--max-workers=3</literal>.  The default is the number of processors.
+                    This option replaces <literal>--parallel-threads</literal> when used in conjuction with <literal>--parallel</literal>.
                 </para>
             </listitem>
         </varlistentry>
@@ -203,8 +210,7 @@
             </term>
             <listitem>
                 <para>Specifies the project-specific cache directory. Default value is
-                    <filename>.gradle</filename>
-                    in the root project directory. See <xref linkend="sec:caching"/>.
+                    <filename>.gradle</filename> in the root project directory.
                 </para>
             </listitem>
         </varlistentry>
@@ -221,9 +227,7 @@
                 <option>--recompile-scripts</option>
             </term>
             <listitem>
-                <para>Specifies that cached build scripts are skipped and forced to be recompiled.
-                    See <xref linkend="sec:caching"/>.
-                </para>
+                <para>Forces scripts to be recompiled, bypassing caching.</para>
             </listitem>
         </varlistentry>
         <varlistentry>
@@ -262,6 +266,14 @@
             </listitem>
         </varlistentry>
         <varlistentry>
+            <term>
+                <option>-t</option>, <option>--continuous (incubating)</option>
+            </term>
+            <listitem>
+                <para>Enables <link linkend="continuous_build">continuous building</link> - Gradle will automatically re-run when changes are detected.</para>
+            </listitem>
+        </varlistentry>
+        <varlistentry>
             <term><option>-u</option>, <option>--no-search-upwards</option>
             </term>
             <listitem>
@@ -293,37 +305,25 @@
 
     <section>
         <title>Deprecated command-line options</title>
-        <para>The following options are deprecated and will be removed in a future version of Gradle:</para>
         <variablelist>
             <varlistentry>
-                <term><option>-C</option>, <option>--cache</option>
+                <term>
+                    <option>--no-color</option>
                 </term>
                 <listitem>
-                    <para>(deprecated) Specifies how compiled build scripts should be cached. Possible values are:
-                        <literal>rebuild</literal>
-                        or <literal>on</literal>. Default value is
-                        <literal>on</literal>. You should use
-                        <option>--recompile-scripts</option>
-                        instead.
-                    </para>
+                    <para>Do not use color in the console output. This option has been replaced by the <option>--console plain</option> option.</para>
                 </listitem>
             </varlistentry>
             <varlistentry>
-                <term><option>--no-opt</option>
+                <term>
+                    <option>--parallel-threads</option>
                 </term>
                 <listitem>
-                    <para>(deprecated) Specifies to ignore all task optimization. You should use
-                        <option>--rerun-tasks</option>
-                        instead.
-                    </para>
-                </listitem>
-            </varlistentry>
-            <varlistentry>
-                <term><option>--refresh</option>
-                </term>
-                <listitem>
-                    <para>(deprecated) Refresh the state of resources of the type(s) specified. Currently only <literal>dependencies</literal> is supported.
-                        You should use <option>--refresh-dependencies</option> instead.
+                    <para>
+                        Build projects in parallel, using the specified number of executor threads.
+                        For example<literal>--parallel-threads=3</literal>.
+                        This option should only be used with decoupled projects (see <xref linkend="sec:decoupled_projects"/>).
+                        This option has been replaced by <literal>--max-workers</literal>.
                     </para>
                 </listitem>
             </varlistentry>
@@ -331,7 +331,7 @@
     </section>
 
     <section id='daemon_cli'>
-        <title>Daemon command-line options:</title>
+        <title>Daemon command-line options</title>
         <para>The
             <xref linkend="gradle_daemon"/>
             contains more information about the daemon.
@@ -441,7 +441,15 @@
                     <literal>GRADLE_USER_HOME</literal>
                 </term>
                 <listitem>
-                    <para>Specifies the Gradle user home directory.</para>
+                    <para>Specifies the Gradle user home directory (which defaults to “<literal>USER_HOME/.gradle</literal>” if not set).</para>
+                </listitem>
+            </varlistentry>
+            <varlistentry>
+                <term>
+                    <literal>JAVA_HOME</literal>
+                </term>
+                <listitem>
+                    <para>Specifies the JDK installation directory to use.</para>
                 </listitem>
             </varlistentry>
         </variablelist>

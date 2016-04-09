@@ -61,8 +61,6 @@ public class TaskReportTaskTest {
             will(returnValue(":path"));
             allowing(project).getTasks();
             will(returnValue(taskContainer));
-            allowing(project).getImplicitTasks();
-            will(returnValue(implicitTasks));
             allowing(project).getConvention();
             will(returnValue(null));
             allowing(project).getAllprojects();
@@ -87,7 +85,7 @@ public class TaskReportTaskTest {
             allowing(project).getDefaultTasks();
             will(returnValue(testDefaultTasks));
 
-            allowing(taskContainer).actualize();
+            allowing(taskContainer).realize();
 
             allowing(taskContainer).size();
             will(returnValue(4));
@@ -144,7 +142,7 @@ public class TaskReportTaskTest {
             allowing(project).getDefaultTasks();
             will(returnValue(defaultTasks));
 
-            allowing(taskContainer).actualize();
+            allowing(taskContainer).realize();
 
             allowing(taskContainer).size();
             will(returnValue(0));

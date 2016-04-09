@@ -15,33 +15,42 @@
  */
 package org.gradle.api.internal.tasks;
 
+import com.google.common.collect.Sets;
 import groovy.lang.Closure;
 import org.apache.commons.lang.StringUtils;
 import org.gradle.api.*;
 import org.gradle.api.internal.DynamicObject;
 import org.gradle.api.internal.NamedDomainObjectContainerConfigureDelegate;
+import org.gradle.api.internal.TaskInternal;
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.internal.project.taskfactory.ITaskFactory;
+import org.gradle.api.tasks.TaskCollection;
 import org.gradle.initialization.ProjectAccessListener;
 import org.gradle.internal.Transformers;
 import org.gradle.internal.graph.CachingDirectedGraphWalker;
 import org.gradle.internal.graph.DirectedGraph;
 import org.gradle.internal.reflect.Instantiator;
+import org.gradle.model.internal.core.*;
+import org.gradle.model.internal.core.rule.describe.SimpleModelRuleDescriptor;
+import org.gradle.model.internal.type.ModelType;
 import org.gradle.util.ConfigureUtil;
-import org.gradle.util.DeprecationLogger;
 import org.gradle.util.GUtil;
 
 import java.util.*;
 
 public class DefaultTaskContainer extends DefaultTaskCollection<Task> implements TaskContainerInternal {
+    private final MutableModelNode modelNode;
     private final ITaskFactory taskFactory;
     private final ProjectAccessListener projectAccessListener;
-    private Map<String, Runnable> placeholders = new HashMap<String, Runnable>();
+    private final Set<String> placeholders = Sets.newHashSet();
+    private final NamedEntityInstantiator<Task> instantiator;
 
-    public DefaultTaskContainer(ProjectInternal project, Instantiator instantiator, ITaskFactory taskFactory, ProjectAccessListener projectAccessListener) {
+    public DefaultTaskContainer(MutableModelNode modelNode, ProjectInternal project, Instantiator instantiator, ITaskFactory taskFactory, ProjectAccessListener projectAccessListener) {
         super(Task.class, instantiator, project);
+        this.modelNode = modelNode;
         this.taskFactory = taskFactory;
         this.projectAccessListener = projectAccessListener;
+        this.instantiator = new TaskInstantiator(taskFactory);
     }
 
     public Task create(Map<String, ?> options) {
@@ -53,13 +62,17 @@ public class DefaultTaskContainer extends DefaultTaskCollection<Task> implements
         Task task = taskFactory.createTask(mutableOptions);
         String name = task.getName();
 
+        if (placeholders.remove(name)) {
+            modelNode.removeLink(name);
+        }
+
         Task existing = findByNameWithoutRules(name);
         if (existing != null) {
             if (replace) {
                 remove(existing);
             } else {
                 throw new InvalidUserDataException(String.format(
-                        "Cannot add %s as a task with that name already exists.", task));
+                    "Cannot add %s as a task with that name already exists.", task));
             }
         }
 
@@ -76,27 +89,12 @@ public class DefaultTaskContainer extends DefaultTaskCollection<Task> implements
         return create(name, type);
     }
 
-    public Task add(Map<String, ?> options) {
-        DeprecationLogger.nagUserOfReplacedMethod("TaskContainer.add()", "create()");
-        return create(options);
-    }
-
     public Task create(Map<String, ?> options, Closure configureClosure) throws InvalidUserDataException {
         return create(options).configure(configureClosure);
     }
 
-    public Task add(Map<String, ?> options, Closure configureClosure) throws InvalidUserDataException {
-        DeprecationLogger.nagUserOfReplacedMethod("TaskContainer.add()", "create()");
-        return create(options, configureClosure);
-    }
-
     public <T extends Task> T create(String name, Class<T> type) {
         return type.cast(create(GUtil.map(Task.TASK_NAME, name, Task.TASK_TYPE, type)));
-    }
-
-    public <T extends Task> T add(String name, Class<T> type) {
-        DeprecationLogger.nagUserOfReplacedMethod("TaskContainer.add()", "create()");
-        return create(name, type);
     }
 
     public Task create(String name) {
@@ -117,22 +115,12 @@ public class DefaultTaskContainer extends DefaultTaskCollection<Task> implements
         return create(name);
     }
 
-    public Task add(String name) {
-        DeprecationLogger.nagUserOfReplacedMethod("TaskContainer.add()", "create()");
-        return create(name);
-    }
-
     public Task replace(String name) {
         return create(GUtil.map(Task.TASK_NAME, name, Task.TASK_OVERWRITE, true));
     }
 
     public Task create(String name, Closure configureClosure) {
         return create(name).configure(configureClosure);
-    }
-
-    public Task add(String name, Closure configureClosure) {
-        DeprecationLogger.nagUserOfReplacedMethod("TaskContainer.add()", "create()");
-        return create(name, configureClosure);
     }
 
     public <T extends Task> T create(String name, Class<T> type, Action<? super T> configuration) throws InvalidUserDataException {
@@ -163,17 +151,11 @@ public class DefaultTaskContainer extends DefaultTaskCollection<Task> implements
         return project.getTasks().findByName(StringUtils.substringAfterLast(path, Project.PATH_SEPARATOR));
     }
 
-    public Task resolveTask(Object path) {
+    public Task resolveTask(String path) {
         if (!GUtil.isTrue(path)) {
             throw new InvalidUserDataException("A path must be specified!");
         }
-        if (!(path instanceof CharSequence)) {
-            DeprecationLogger.nagUserOfDeprecated(
-                    String.format("Converting class %s to a task dependency using toString()", path.getClass().getName()),
-                    "Please use org.gradle.api.Task, java.lang.String, org.gradle.api.Buildable, org.gradle.tasks.TaskDependency or a Closure to declare your task dependencies"
-            );
-        }
-        return getByPath(path.toString());
+        return getByPath(path);
     }
 
     public Task getByPath(String path) throws UnknownTaskException {
@@ -189,38 +171,47 @@ public class DefaultTaskContainer extends DefaultTaskCollection<Task> implements
         return this;
     }
 
+    @Override
+    public NamedEntityInstantiator<Task> getEntityInstantiator() {
+        return instantiator;
+    }
+
     public DynamicObject getTasksAsDynamicObject() {
         return getElementsAsDynamicObject();
     }
 
     public SortedSet<String> getNames() {
-        SortedSet<String> set = new TreeSet<String>();
-        for (Task o : getStore()) {
-            set.add(o.getName());
-        }
-        for (String placeHolderName : placeholders.keySet()) {
-            set.add(placeHolderName);
-        }
-        return set;
+        return Sets.newTreeSet(modelNode.getLinkNames(ModelType.of(Task.class)));
     }
 
-    public void actualize() {
+    public void realize() {
+        project.getModelRegistry().realizeNode(modelNode.getPath());
+
         new CachingDirectedGraphWalker<Task, Void>(new DirectedGraph<Task, Void>() {
             public void getNodeValues(Task node, Collection<? super Void> values, Collection<? super Task> connectedNodes) {
                 connectedNodes.addAll(node.getTaskDependencies().getDependencies(node));
             }
         }).add(this).findValues();
-
-
-        final HashSet<String> placeholderNames = new HashSet<String>(placeholders.keySet());
-        for (String placeholder : placeholderNames) {
-            maybeMaterializePlaceholder(placeholder);
-        }
-
     }
 
-    public Map<String, Runnable> getPlaceholderActions() {
-        return placeholders;
+    @Override
+    public void discoverTasks() {
+        project.fireDeferredConfiguration();
+        project.getModelRegistry().atStateOrLater(modelNode.getPath(), ModelNode.State.SelfClosed);
+    }
+
+    @Override
+    public void prepareForExecution(Task task) {
+        assert task.getProject() == project;
+        if (modelNode.hasLink(task.getName())) {
+            realizeTask(MODEL_PATH.child(task.getName()), ModelNode.State.GraphClosed);
+        }
+    }
+
+    private void maybeCreateTasks(String name) {
+        if (modelNode.hasLink(name)) {
+            realizeTask(MODEL_PATH.child(name), ModelNode.State.Initialized);
+        }
     }
 
     public Task findByName(String name) {
@@ -228,24 +219,81 @@ public class DefaultTaskContainer extends DefaultTaskCollection<Task> implements
         if (task != null) {
             return task;
         }
-        maybeMaterializePlaceholder(name);
+        maybeCreateTasks(name);
+        placeholders.remove(name);
         return super.findByName(name);
     }
 
-    private void maybeMaterializePlaceholder(String name) {
-        if (placeholders.containsKey(name)) {
-            if (super.findByName(name) == null) {
-                final Runnable placeholderAction = placeholders.remove(name);
-                placeholderAction.run();
-            }
-        }
+    private Task realizeTask(ModelPath taskPath, ModelNode.State minState) {
+        return project.getModelRegistry().atStateOrLater(taskPath, ModelType.of(Task.class), minState);
     }
 
-    public void addPlaceholderAction(String placeholderName, Runnable runnable) {
-        placeholders.put(placeholderName, runnable);
+    public <T extends TaskInternal> void addPlaceholderAction(final String placeholderName, final Class<T> taskType, final Action<? super T> configure) {
+        if (!modelNode.hasLink(placeholderName)) {
+            final ModelType<T> taskModelType = ModelType.of(taskType);
+            ModelPath path = MODEL_PATH.child(placeholderName);
+            modelNode.addLink(
+                ModelRegistrations.of(path)
+                    .action(ModelActionRole.Create, new TaskCreator<T>(placeholderName, taskType, configure, taskModelType))
+                    .withProjection(new UnmanagedModelProjection<T>(taskModelType))
+                    .descriptor(new SimpleModelRuleDescriptor("tasks.addPlaceholderAction(" + placeholderName + ")"))
+                    .build()
+            );
+        }
+        if (findByNameWithoutRules(placeholderName) == null) {
+            placeholders.add(placeholderName);
+        }
     }
 
     public <U extends Task> NamedDomainObjectContainer<U> containerWithType(Class<U> type) {
         throw new UnsupportedOperationException();
+    }
+
+    public Set<? extends Class<? extends Task>> getCreateableTypes() {
+        return Collections.singleton(getType());
+    }
+
+    private static class TaskInstantiator implements NamedEntityInstantiator<Task> {
+        private final ITaskFactory taskFactory;
+
+        public TaskInstantiator(ITaskFactory taskFactory) {
+            this.taskFactory = taskFactory;
+        }
+
+        @Override
+        public <S extends Task> S create(String name, Class<S> type) {
+            if (type.isAssignableFrom(TaskInternal.class)) {
+                return type.cast(taskFactory.create(name, TaskInternal.class));
+            }
+            return type.cast(taskFactory.create(name, type.asSubclass(TaskInternal.class)));
+        }
+    }
+
+    private static class TaskCreator<T extends TaskInternal> implements Action<MutableModelNode> {
+        private final String placeholderName;
+        private final Class<T> taskType;
+        private final Action<? super T> configure;
+        private final ModelType<T> taskModelType;
+
+        public TaskCreator(String placeholderName, Class<T> taskType, Action<? super T> configure, ModelType<T> taskModelType) {
+            this.placeholderName = placeholderName;
+            this.taskType = taskType;
+            this.configure = configure;
+            this.taskModelType = taskModelType;
+        }
+
+        @Override
+        public void execute(final MutableModelNode mutableModelNode) {
+            DefaultTaskContainer taskContainer = mutableModelNode.getParent().getPrivateData(ModelType.of(DefaultTaskContainer.class));
+            T task = taskContainer.taskFactory.create(placeholderName, taskType);
+            configure.execute(task);
+            taskContainer.add(task);
+            mutableModelNode.setPrivateData(taskModelType, task);
+        }
+    }
+
+    @Override
+    public <S extends Task> TaskCollection<S> withType(Class<S> type) {
+        return new RealizableTaskCollection<S>(type, super.withType(type), modelNode);
     }
 }

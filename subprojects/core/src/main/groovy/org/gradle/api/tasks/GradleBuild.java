@@ -15,9 +15,9 @@
  */
 package org.gradle.api.tasks;
 
-import org.gradle.initialization.GradleLauncher;
 import org.gradle.StartParameter;
 import org.gradle.api.internal.ConventionTask;
+import org.gradle.initialization.GradleLauncher;
 import org.gradle.initialization.GradleLauncherFactory;
 
 import java.io.File;
@@ -114,7 +114,7 @@ public class GradleBuild extends ConventionTask {
     void build() {
         GradleLauncher launcher = gradleLauncherFactory.newInstance(getStartParameter());
         try {
-            launcher.run().rethrowFailure();
+            launcher.run();
         } finally {
             launcher.stop();
         }

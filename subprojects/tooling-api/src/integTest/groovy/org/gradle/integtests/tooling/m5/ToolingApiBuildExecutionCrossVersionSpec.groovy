@@ -15,16 +15,12 @@
  */
 package org.gradle.integtests.tooling.m5
 
-import org.gradle.integtests.tooling.fixture.TargetGradleVersion
 import org.gradle.integtests.tooling.fixture.ToolingApiSpecification
-import org.gradle.integtests.tooling.fixture.ToolingApiVersion
 import org.gradle.tooling.BuildException
 import org.gradle.tooling.model.GradleProject
 import org.gradle.tooling.model.Task
 import org.gradle.tooling.model.eclipse.EclipseProject
 
-@ToolingApiVersion('>=1.2')
-@TargetGradleVersion('>=1.0-milestone-8')
 class ToolingApiBuildExecutionCrossVersionSpec extends ToolingApiSpecification {
     def "can build the set of tasks for a project"() {
         file('build.gradle') << '''
@@ -39,14 +35,12 @@ task c
         GradleProject project = withConnection { connection -> connection.getModel(GradleProject.class) }
 
         then:
-        project.tasks.count { it.name != 'setupBuild' } == 3
+        project.tasks*.name.toSet() == (["a", "b", "c"] + rootProjectImplicitTasksForGradleProjectModel).toSet()
         def taskA = project.tasks.find { it.name == 'a' }
         taskA != null
         taskA.path == ':a'
         taskA.description == 'this is task a'
         taskA.project == project
-        project.tasks.find { it.name == 'b' }
-        project.tasks.find { it.name == 'c' }
     }
 
     def "can execute a build for a project"() {
@@ -115,7 +109,7 @@ task c
 '''
 
         when:
-        EclipseProject project = withConnection { connection -> connection.getModel(EclipseProject.class) }
+        EclipseProject project = loadToolingModel(EclipseProject)
 
         then:
         def taskA = project.gradleProject.tasks.find { it.name == 'a' }

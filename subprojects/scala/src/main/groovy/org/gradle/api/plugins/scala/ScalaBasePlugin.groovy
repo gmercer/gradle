@@ -17,9 +17,8 @@ package org.gradle.api.plugins.scala
 
 import org.gradle.api.Plugin
 import org.gradle.api.Project
-import org.gradle.api.artifacts.Configuration
 import org.gradle.api.file.FileTreeElement
-import org.gradle.api.internal.file.FileResolver
+import org.gradle.api.internal.file.SourceDirectorySetFactory
 import org.gradle.api.internal.tasks.DefaultScalaSourceSet
 import org.gradle.api.plugins.JavaBasePlugin
 import org.gradle.api.plugins.JavaPluginConvention
@@ -28,42 +27,29 @@ import org.gradle.api.tasks.ScalaRuntime
 import org.gradle.api.tasks.SourceSet
 import org.gradle.api.tasks.scala.ScalaCompile
 import org.gradle.api.tasks.scala.ScalaDoc
-import org.gradle.api.tasks.JavaExec
-import org.gradle.util.DeprecationLogger
+import org.gradle.language.scala.internal.toolchain.DefaultScalaToolProvider
 
 import javax.inject.Inject
 
 class ScalaBasePlugin implements Plugin<Project> {
-    /**
-     * The name of the configuration holding the Scala compiler and tools.
-     *
-     * @deprecated Typically, usages of {@code scalaTools} can simply be removed,
-     * and the Scala tools libraries to be used will be inferred from the Scala
-     * library found on the regular (compile) class path. In some cases, it may
-     * be necessary to additionally configure the {@code scalaClasspath} property
-     * of {@code ScalaCompile} and {@code ScalaDoc} tasks.
-     */
-    static final String SCALA_TOOLS_CONFIGURATION_NAME = "scalaTools"
-
     static final String ZINC_CONFIGURATION_NAME = "zinc"
 
     static final String SCALA_RUNTIME_EXTENSION_NAME = "scalaRuntime"
 
-    private static final String DEFAULT_ZINC_VERSION = "0.3.0"
-
-    private final FileResolver fileResolver
+    private final SourceDirectorySetFactory sourceDirectorySetFactory
 
     private Project project
     private ScalaRuntime scalaRuntime
 
     @Inject
-    ScalaBasePlugin(FileResolver fileResolver) {
-        this.fileResolver = fileResolver
+    ScalaBasePlugin(SourceDirectorySetFactory sourceDirectorySetFactory) {
+        this.sourceDirectorySetFactory = sourceDirectorySetFactory
     }
 
     void apply(Project project) {
         this.project = project
-        def javaPlugin = project.plugins.apply(JavaBasePlugin.class)
+        project.pluginManager.apply(JavaBasePlugin)
+        def javaPlugin = project.plugins.getPlugin(JavaBasePlugin.class)
 
         configureConfigurations(project)
         configureScalaRuntimeExtension()
@@ -73,24 +59,9 @@ class ScalaBasePlugin implements Plugin<Project> {
     }
 
     private void configureConfigurations(Project project) {
-        def scalaToolsConfiguration = project.configurations.create(SCALA_TOOLS_CONFIGURATION_NAME)
-                .setVisible(false)
-                .setDescription("The Scala tools libraries to be used for this Scala project. (Deprecated)")
-        deprecateScalaToolsConfiguration(scalaToolsConfiguration)
-
         project.configurations.create(ZINC_CONFIGURATION_NAME)
                 .setVisible(false)
                 .setDescription("The Zinc incremental compiler to be used for this Scala project.")
-    }
-
-    private void deprecateScalaToolsConfiguration(Configuration scalaConfiguration) {
-        scalaConfiguration.dependencies.whenObjectAdded {
-            DeprecationLogger.nagUserOfDiscontinuedConfiguration(SCALA_TOOLS_CONFIGURATION_NAME,
-                    "Typically, usages of 'scalaTools' can simply be removed, and the Scala tools libraries " +
-                    "to be used will be inferred from the Scala library found on the regular (compile) class path. " +
-                    "In some cases, it may be necessary to additionally configure the 'scalaClasspath' property of " +
-                    "ScalaCompile and ScalaDoc tasks.");
-        }
     }
 
     private void configureScalaRuntimeExtension() {
@@ -99,14 +70,13 @@ class ScalaBasePlugin implements Plugin<Project> {
 
     private void configureSourceSetDefaults(JavaBasePlugin javaPlugin) {
         project.convention.getPlugin(JavaPluginConvention.class).sourceSets.all { SourceSet sourceSet ->
-            sourceSet.convention.plugins.scala = new DefaultScalaSourceSet(sourceSet.displayName, fileResolver)
+            sourceSet.convention.plugins.scala = new DefaultScalaSourceSet(sourceSet.displayName, sourceDirectorySetFactory)
             sourceSet.scala.srcDir { project.file("src/$sourceSet.name/scala") }
             sourceSet.allJava.source(sourceSet.scala)
             sourceSet.allSource.source(sourceSet.scala)
             sourceSet.resources.filter.exclude { FileTreeElement element -> sourceSet.scala.contains(element.file) }
 
             configureScalaCompile(javaPlugin, sourceSet)
-            configureScalaConsole(sourceSet)
         }
     }
 
@@ -134,26 +104,14 @@ class ScalaBasePlugin implements Plugin<Project> {
         }
     }
 
-    private void configureScalaConsole(SourceSet sourceSet) {
-        def taskName = sourceSet.getTaskName("scala", "Console")
-        def scalaConsole = project.tasks.create(taskName, JavaExec)
-        scalaConsole.dependsOn(sourceSet.runtimeClasspath)
-        scalaConsole.description = "Starts a Scala REPL with the $sourceSet.name runtime class path."
-        scalaConsole.main = "scala.tools.nsc.MainGenericRunner"
-        scalaConsole.conventionMapping.classpath = { scalaRuntime.inferScalaClasspath(sourceSet.runtimeClasspath) }
-        scalaConsole.systemProperty("scala.usejavacp", true)
-        scalaConsole.standardInput = System.in
-        scalaConsole.conventionMapping.jvmArgs = { ["-classpath", sourceSet.runtimeClasspath.asPath] }
-    }
-
     private void configureCompileDefaults() {
         project.tasks.withType(ScalaCompile.class) { ScalaCompile compile ->
             compile.conventionMapping.scalaClasspath = { scalaRuntime.inferScalaClasspath(compile.classpath) }
             compile.conventionMapping.zincClasspath = {
                 def config = project.configurations[ZINC_CONFIGURATION_NAME]
-                if (!compile.scalaCompileOptions.useAnt && config.dependencies.empty) {
+                if (!compile.scalaCompileOptions.internalIsUseAnt() && config.dependencies.empty) {
                     project.dependencies {
-                        zinc("com.typesafe.zinc:zinc:$DEFAULT_ZINC_VERSION")
+                        zinc("com.typesafe.zinc:zinc:$DefaultScalaToolProvider.DEFAULT_ZINC_VERSION")
                     }
                 }
                 config

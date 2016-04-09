@@ -1,5 +1,3 @@
-import org.gradle.api.artifacts.repositories.IvyArtifactRepository
-
 //START SNIPPET maven-ivy-repository-no-auth
 repositories {
     maven {
@@ -32,6 +30,26 @@ repositories {
 }
 //END SNIPPET maven-ivy-repository-auth
 
+//START SNIPPET maven-ivy-s3-repository
+repositories {
+    maven {
+        url "s3://myCompanyBucket/maven2"
+        credentials(AwsCredentials) {
+            accessKey "someKey"
+            secretKey "someSecret"
+        }
+    }
+
+    ivy {
+        url "s3://myCompanyBucket/ivyrepo"
+        credentials(AwsCredentials) {
+            accessKey "someKey"
+            secretKey "someSecret"
+        }
+    }
+}
+//END SNIPPET maven-ivy-s3-repository
+
 //START SNIPPET maven-central
 repositories {
     mavenCentral()
@@ -43,6 +61,14 @@ repositories {
     jcenter()
 }
 //END SNIPPET maven-jcenter
+
+//START SNIPPET maven-jcenter-http
+repositories {
+    jcenter {
+        url "http://jcenter.bintray.com/"
+    }
+}
+//END SNIPPET maven-jcenter-http
 
 //START SNIPPET maven-central-jar-repo
 repositories {
@@ -215,3 +241,33 @@ repositories.localRepository {
     dirs 'lib'
 }
 //END SNIPPET configure-resolver
+
+//START SNIPPET digest-authentication
+repositories {
+    maven {
+        url 'https://repo.mycompany.com/maven2'
+        credentials {
+            username 'user'
+            password 'password'
+        }
+        authentication {
+            digest(DigestAuthentication)
+        }
+    }
+}
+//END SNIPPET digest-authentication
+
+//START SNIPPET preemptive-authentication
+repositories {
+    maven {
+        url 'https://repo.mycompany.com/maven2'
+        credentials {
+            username 'user'
+            password 'password'
+        }
+        authentication {
+            basic(BasicAuthentication)
+        }
+    }
+}
+//END SNIPPET preemptive-authentication

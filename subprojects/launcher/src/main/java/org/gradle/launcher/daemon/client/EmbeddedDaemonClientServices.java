@@ -16,11 +16,12 @@
 package org.gradle.launcher.daemon.client;
 
 import org.gradle.initialization.BuildLayoutParameters;
-import org.gradle.initialization.GradleLauncherFactory;
 import org.gradle.internal.Factory;
 import org.gradle.internal.concurrent.ExecutorFactory;
-import org.gradle.internal.nativeplatform.ProcessEnvironment;
+import org.gradle.internal.nativeintegration.ProcessEnvironment;
+import org.gradle.internal.nativeintegration.services.NativeServices;
 import org.gradle.internal.service.ServiceRegistry;
+import org.gradle.internal.service.ServiceRegistryBuilder;
 import org.gradle.internal.service.scopes.GlobalScopeServices;
 import org.gradle.launcher.daemon.configuration.DaemonParameters;
 import org.gradle.launcher.daemon.context.DaemonContext;
@@ -33,11 +34,13 @@ import org.gradle.launcher.daemon.server.DaemonServerConnector;
 import org.gradle.launcher.daemon.server.DaemonTcpServerConnector;
 import org.gradle.launcher.daemon.server.exec.DaemonCommandExecuter;
 import org.gradle.launcher.daemon.server.exec.DefaultDaemonCommandExecuter;
-import org.gradle.launcher.daemon.server.exec.NoOpDaemonCommandAction;
-import org.gradle.logging.LoggingManagerInternal;
-import org.gradle.logging.LoggingServiceRegistry;
-import org.gradle.logging.internal.OutputEvent;
-import org.gradle.logging.internal.OutputEventListener;
+import org.gradle.launcher.exec.BuildExecuter;
+import org.gradle.internal.logging.LoggingManagerInternal;
+import org.gradle.internal.logging.LoggingServiceRegistry;
+import org.gradle.internal.logging.internal.OutputEvent;
+import org.gradle.internal.logging.internal.OutputEventListener;
+import org.gradle.internal.remote.services.MessagingServices;
+import org.gradle.internal.remote.internal.inet.InetAddressFactory;
 
 import java.io.File;
 import java.util.UUID;
@@ -47,7 +50,7 @@ import java.util.UUID;
  */
 public class EmbeddedDaemonClientServices extends DaemonClientServicesSupport {
     public EmbeddedDaemonClientServices() {
-        this(LoggingServiceRegistry.newProcessLogging());
+        this(LoggingServiceRegistry.newCommandLineProcessLogging());
     }
 
     private class EmbeddedDaemonFactory implements Factory<Daemon> {
@@ -65,13 +68,19 @@ public class EmbeddedDaemonClientServices extends DaemonClientServicesSupport {
 
     protected DaemonCommandExecuter createDaemonCommandExecuter() {
         LoggingManagerInternal mgr = newInstance(LoggingManagerInternal.class);
-        return new DefaultDaemonCommandExecuter(get(GradleLauncherFactory.class),
-                get(ProcessEnvironment.class), mgr, new File("dummy"), new NoOpDaemonCommandAction());
+        return new DefaultDaemonCommandExecuter(
+            get(BuildExecuter.class),
+            this,
+            get(ProcessEnvironment.class),
+            mgr,
+            new File("dummy"),
+            new StubDaemonHealthServices()
+        );
     }
 
     public EmbeddedDaemonClientServices(ServiceRegistry loggingServices) {
-        super(loggingServices, System.in);
-        addProvider(new GlobalScopeServices(false));
+        super(ServiceRegistryBuilder.builder().parent(loggingServices).parent(NativeServices.getInstance()).build(), System.in);
+        addProvider(new GlobalScopeServices(true));
         add(EmbeddedDaemonFactory.class, new EmbeddedDaemonFactory());
     }
 
@@ -80,7 +89,10 @@ public class EmbeddedDaemonClientServices extends DaemonClientServicesSupport {
     }
 
     protected OutputEventListener createOutputEventListener() {
-        return new OutputEventListener() { public void onOutput(OutputEvent event) {} };
+        return new OutputEventListener() {
+            public void onOutput(OutputEvent event) {
+            }
+        };
     }
 
     @Override
@@ -90,7 +102,7 @@ public class EmbeddedDaemonClientServices extends DaemonClientServicesSupport {
     }
 
     protected DaemonServerConnector createDaemonServerConnector() {
-        return new DaemonTcpServerConnector();
+        return new DaemonTcpServerConnector(get(ExecutorFactory.class), get(MessagingServices.class).get(InetAddressFactory.class));
     }
 
     protected DaemonStarter createDaemonStarter() {

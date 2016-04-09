@@ -17,8 +17,8 @@ package org.gradle.initialization;
 
 import org.gradle.api.artifacts.DependencyResolutionListener;
 import org.gradle.api.artifacts.ResolvableDependencies;
-import org.gradle.logging.ProgressLogger;
-import org.gradle.logging.ProgressLoggerFactory;
+import org.gradle.internal.logging.ProgressLogger;
+import org.gradle.internal.logging.ProgressLoggerFactory;
 
 import java.util.LinkedList;
 
@@ -34,7 +34,6 @@ public class DependencyResolutionLogger implements DependencyResolutionListener 
         this.loggerFactory = loggerFactory;
     }
 
-    //TODO SF add concurrent unit test coverage
     public void beforeResolve(ResolvableDependencies dependencies) {
         LinkedList<ProgressLogger> loggers = progressLoggers.get();
         progressLoggers.set(loggers);

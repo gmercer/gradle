@@ -16,101 +16,214 @@
 
 package org.gradle.api.internal.plugins;
 
-import org.gradle.api.InvalidUserDataException;
-import org.gradle.api.Plugin;
+import com.google.common.base.Optional;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
+import com.google.common.util.concurrent.UncheckedExecutionException;
+import org.gradle.api.Nullable;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
-import org.gradle.api.plugins.PluginInstantiationException;
-import org.gradle.api.plugins.UnknownPluginException;
-import org.gradle.internal.Factories;
-import org.gradle.internal.Factory;
-import org.gradle.internal.reflect.Instantiator;
-import org.gradle.internal.reflect.ObjectInstantiationException;
+import org.gradle.api.plugins.InvalidPluginException;
+import org.gradle.internal.Cast;
+import org.gradle.internal.UncheckedException;
+import org.gradle.plugin.internal.PluginId;
 import org.gradle.util.GUtil;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.concurrent.ExecutionException;
 
 public class DefaultPluginRegistry implements PluginRegistry {
-    private final Map<String, Class<? extends Plugin>> idMappings = new HashMap<String, Class<? extends Plugin>>();
-    private final DefaultPluginRegistry parent;
-    private final Factory<ClassLoader> classLoaderFactory;
-    private final Instantiator instantiator;
+    private final PluginRegistry parent;
+    private final PluginInspector pluginInspector;
+    private final ClassLoaderScope classLoaderScope;
 
-    public DefaultPluginRegistry(ClassLoader classLoader, Instantiator instantiator) {
-        this(null, Factories.constant(classLoader), instantiator);
+    private final LoadingCache<Class<?>, PluginImplementation<?>> classMappings;
+    private final LoadingCache<PluginIdLookupCacheKey, Optional<PluginImplementation<?>>> idMappings;
+
+    public DefaultPluginRegistry(PluginInspector pluginInspector, ClassLoaderScope classLoaderScope) {
+        this(null, pluginInspector, classLoaderScope);
     }
 
-    private DefaultPluginRegistry(DefaultPluginRegistry parent, Factory<ClassLoader> classLoaderFactory, Instantiator instantiator) {
+    private DefaultPluginRegistry(PluginRegistry parent, final PluginInspector pluginInspector, ClassLoaderScope classLoaderScope) {
         this.parent = parent;
-        this.classLoaderFactory = classLoaderFactory;
-        this.instantiator = instantiator;
-    }
+        this.pluginInspector = pluginInspector;
+        this.classLoaderScope = classLoaderScope;
+        this.classMappings = CacheBuilder.newBuilder().build(new PotentialPluginCacheLoader(pluginInspector));
+        this.idMappings = CacheBuilder.newBuilder().build(new CacheLoader<PluginIdLookupCacheKey, Optional<PluginImplementation<?>>>() {
+            @Override
+            public Optional<PluginImplementation<?>> load(@SuppressWarnings("NullableProblems") PluginIdLookupCacheKey key) throws Exception {
+                PluginId pluginId = key.getId();
+                ClassLoader classLoader = key.getClassLoader();
 
-    public PluginRegistry createChild(final ClassLoaderScope lookupScope, Instantiator instantiator) {
-        Factory<ClassLoader> classLoaderFactory = new Factory<ClassLoader>() {
-            public ClassLoader create() {
-                return lookupScope.getScopeClassLoader();
+                PluginDescriptorLocator locator = new ClassloaderBackedPluginDescriptorLocator(classLoader);
+
+                PluginDescriptor pluginDescriptor = locator.findPluginDescriptor(pluginId.toString());
+                if (pluginDescriptor == null) {
+                    return Optional.absent();
+                }
+
+                String implClassName = pluginDescriptor.getImplementationClassName();
+                if (!GUtil.isTrue(implClassName)) {
+                    throw new InvalidPluginException(String.format("No implementation class specified for plugin '%s' in %s.", pluginId, pluginDescriptor));
+                }
+
+                final Class<?> implClass;
+                try {
+                    implClass = classLoader.loadClass(implClassName);
+                } catch (ClassNotFoundException e) {
+                    throw new InvalidPluginException(String.format(
+                            "Could not find implementation class '%s' for plugin '%s' specified in %s.", implClassName, pluginId,
+                            pluginDescriptor), e);
+                }
+
+                PotentialPlugin<?> potentialPlugin = pluginInspector.inspect(implClass);
+                PluginImplementation<Object> withId = new RegistryAwarePluginImplementation(classLoader, pluginId, potentialPlugin);
+                return Cast.uncheckedCast(Optional.of(withId));
             }
-        };
-        return new DefaultPluginRegistry(this, classLoaderFactory, instantiator);
+        });
     }
 
-    public <T extends Plugin> T loadPlugin(Class<T> pluginClass) {
-        if (!Plugin.class.isAssignableFrom(pluginClass)) {
-            throw new InvalidUserDataException(String.format(
-                    "Cannot create plugin of type '%s' as it does not implement the Plugin interface.",
-                    pluginClass.getSimpleName()));
-        }
-        try {
-            return instantiator.newInstance(pluginClass);
-        } catch (ObjectInstantiationException e) {
-            throw new PluginInstantiationException(String.format("Could not create plugin of type '%s'.",
-                    pluginClass.getSimpleName()), e.getCause());
-        }
+    public PluginRegistry createChild(final ClassLoaderScope lookupScope) {
+        return new DefaultPluginRegistry(this, pluginInspector, lookupScope);
     }
 
-    public Class<? extends Plugin> getTypeForId(String pluginId) {
+    @Nullable
+    @Override
+    public <T> PluginImplementation<T> maybeInspect(Class<T> clazz) {
+        if (classLoaderScope.defines(clazz)) {
+            return Cast.uncheckedCast(uncheckedGet(classMappings, clazz));
+        }
+
         if (parent != null) {
-            try {
-                return parent.getTypeForId(pluginId);
-            } catch (UnknownPluginException e) {
-                // Ignore
+            PluginImplementation<T> implementation = parent.maybeInspect(clazz);
+            if (implementation != null) {
+                return implementation;
             }
         }
 
-        Class<? extends Plugin> implClass = idMappings.get(pluginId);
-        if (implClass != null) {
-            return implClass;
+        return null;
+    }
+
+    public <T> PluginImplementation<T> inspect(Class<T> clazz) {
+        PluginImplementation<T> implementation = maybeInspect(clazz);
+        if (implementation != null) {
+            return implementation;
         }
 
-        ClassLoader classLoader = this.classLoaderFactory.create();
+        // Unknown type - just inspect ourselves. Should instead share this with all registries
+        return Cast.uncheckedCast(uncheckedGet(classMappings, clazz));
+    }
 
-        PluginDescriptorLocator pluginDescriptorLocator = new ClassloaderBackedPluginDescriptorLocator(classLoader);
-        PluginDescriptor pluginDescriptor = pluginDescriptorLocator.findPluginDescriptor(pluginId);
-        if (pluginDescriptor == null) {
-            throw new UnknownPluginException("Plugin with id '" + pluginId + "' not found.");
+    @Nullable
+    @Override
+    public PluginImplementation<?> lookup(PluginId pluginId) {
+        PluginImplementation lookup;
+        if (parent != null) {
+            lookup = parent.lookup(pluginId);
+            if (lookup != null) {
+                return lookup;
+            }
         }
 
-        String implClassName = pluginDescriptor.getImplementationClassName();
-        if (!GUtil.isTrue(implClassName)) {
-            throw new PluginInstantiationException(String.format(
-                    "No implementation class specified for plugin '%s' in %s.", pluginId, pluginDescriptor));
+        return lookup(pluginId, classLoaderScope.getLocalClassLoader());
+    }
+
+    @Nullable
+    private PluginImplementation<?> lookup(PluginId pluginId, ClassLoader classLoader) {
+        // Don't go up the parent chain.
+        // Don't want to risk classes crossing “scope” boundaries and being non collectible.
+
+        PluginImplementation lookup;
+        if (!pluginId.isQualified()) {
+            PluginId qualified = pluginId.maybeQualify(DefaultPluginManager.CORE_PLUGIN_NAMESPACE);
+            lookup = uncheckedGet(idMappings, new PluginIdLookupCacheKey(qualified, classLoader)).orNull();
+            if (lookup != null) {
+                return lookup;
+            }
         }
 
+        return uncheckedGet(idMappings, new PluginIdLookupCacheKey(pluginId, classLoader)).orNull();
+    }
+
+    private static <K, V> V uncheckedGet(LoadingCache<K, V> cache, K key) {
         try {
-            Class<?> rawClass = classLoader.loadClass(implClassName);
-            if (!Plugin.class.isAssignableFrom(rawClass)) {
-                throw new PluginInstantiationException(String.format("Implementation class '%s' specified for plugin '%s' does not implement the Plugin interface. Specified in %s.",
-                        implClassName, pluginId, pluginDescriptor));
-            }
-            implClass = rawClass.asSubclass(Plugin.class);
-        } catch (ClassNotFoundException e) {
-            throw new PluginInstantiationException(String.format(
-                    "Could not find implementation class '%s' for plugin '%s' specified in %s.", implClassName, pluginId,
-                    pluginDescriptor), e);
+            return cache.get(key);
+        } catch (ExecutionException e) {
+            throw UncheckedException.throwAsUncheckedException(e.getCause());
+        } catch (UncheckedExecutionException e) {
+            throw UncheckedException.throwAsUncheckedException(e.getCause());
+        }
+    }
+
+    static class PluginIdLookupCacheKey {
+
+        private final ClassLoader classLoader;
+        private final PluginId id;
+
+        PluginIdLookupCacheKey(PluginId id, ClassLoader classLoader) {
+            this.classLoader = classLoader;
+            this.id = id;
         }
 
-        idMappings.put(pluginId, implClass);
-        return implClass;
+        public PluginId getId() {
+            return id;
+        }
+
+        public ClassLoader getClassLoader() {
+            return classLoader;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+
+            PluginIdLookupCacheKey that = (PluginIdLookupCacheKey) o;
+
+            return classLoader.equals(that.classLoader) && id.equals(that.id);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = classLoader.hashCode();
+            result = 31 * result + id.hashCode();
+            return result;
+        }
+    }
+
+    private class PotentialPluginCacheLoader extends CacheLoader<Class<?>, PluginImplementation<?>> {
+        private final PluginInspector pluginInspector;
+
+        public PotentialPluginCacheLoader(PluginInspector pluginInspector) {
+            this.pluginInspector = pluginInspector;
+        }
+
+        @Override
+        public PluginImplementation<?> load(@SuppressWarnings("NullableProblems") Class<?> key) throws Exception {
+            return new RegistryAwarePluginImplementation(key.getClassLoader(), null, pluginInspector.inspect(key));
+        }
+    }
+
+    private class RegistryAwarePluginImplementation extends DefaultPotentialPluginWithId<Object> {
+        private final ClassLoader classLoader;
+        private final PluginId pluginId;
+
+        public RegistryAwarePluginImplementation(ClassLoader classLoader, PluginId pluginId, PotentialPlugin<?> potentialPlugin) {
+            super(pluginId, potentialPlugin);
+            this.classLoader = classLoader;
+            this.pluginId = pluginId;
+        }
+
+        @Override
+        public boolean isAlsoKnownAs(PluginId id) {
+            if (id.equals(pluginId)) {
+                return true;
+            }
+            PluginImplementation<?> other = lookup(id, classLoader);
+            return other != null && other.asClass().equals(asClass());
+        }
     }
 }

@@ -16,7 +16,6 @@
 
 package org.gradle.api.plugins;
 
-import groovy.lang.Closure;
 import org.gradle.api.Action;
 import org.gradle.api.Incubating;
 import org.gradle.api.Plugin;
@@ -30,7 +29,7 @@ import org.gradle.api.Plugin;
  */
 public interface PluginContainer extends PluginCollection<Plugin> {
     /**
-     * Has the same behavior as {@link #apply(Class)} except that the the plugin is specified via its id. Not all
+     * Has the same behavior as {@link #apply(Class)} except that the plugin is specified via its id. Not all
      * plugins have an id.
      *
      * @param id The id of the plugin to be applied.
@@ -123,11 +122,6 @@ public interface PluginContainer extends PluginCollection<Plugin> {
      * @param action the action
      */
     @Incubating
-    void withId(String pluginId, Action<Plugin> action);
+    void withId(String pluginId, Action<? super Plugin> action);
 
-    /**
-     * See {@link #withId(String, org.gradle.api.Action)}
-     */
-    @Incubating
-    void withId(String pluginId, Closure closure);
 }

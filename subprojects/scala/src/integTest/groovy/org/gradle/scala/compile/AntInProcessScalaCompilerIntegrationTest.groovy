@@ -16,27 +16,10 @@
 
 package org.gradle.scala.compile
 
-import org.gradle.integtests.fixtures.TargetVersions
+import org.gradle.integtests.fixtures.ScalaCoverage
+import org.gradle.integtests.fixtures.TargetCoverage
+import org.gradle.test.fixtures.file.LeaksFileHandles
 
-@TargetVersions(["2.8.2", "2.9.2"])
-class AntInProcessScalaCompilerIntegrationTest extends BasicScalaCompilerIntegrationTest {
-    def setup() {
-        executer.requireIsolatedDaemons()
-    }
-
-    String compilerConfiguration() {
-        '''
-compileScala.scalaCompileOptions.with {
-    useAnt = true
-}
-'''
-    }
-
-    String logStatement() {
-        "Compiling with Ant scalac task"
-    }
-
-    String getErrorOutput() {
-        return result.output
-    }
-}
+@TargetCoverage({ScalaCoverage.DEFAULT})
+@LeaksFileHandles
+class AntInProcessScalaCompilerIntegrationTest extends AbstractAntInProcessScalaCompilerIntegrationTest {}

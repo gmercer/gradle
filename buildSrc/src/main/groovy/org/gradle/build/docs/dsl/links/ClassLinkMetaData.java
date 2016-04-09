@@ -58,13 +58,17 @@ public class ClassLinkMetaData implements Serializable, Attachable<ClassLinkMeta
 
     public LinkMetaData getMethod(String method) {
         MethodLinkMetaData methodMetaData = findMethod(method);
-        String displayName;
         String urlFragment = methodMetaData.getUrlFragment(className);
-        displayName = String.format("%s.%s", simpleName, methodMetaData.getDisplayName());
+        String displayName = String.format("%s.%s", simpleName, methodMetaData.getDisplayName());
         return new LinkMetaData(methodMetaData.style, displayName, urlFragment);
     }
 
     private MethodLinkMetaData findMethod(String method) {
+        if (method.endsWith("...)")) {
+            // Should reuse the link parsing stuff from JavadocLinkConverter instead
+            method = method.substring(0, method.length() - 4) + "[])";
+        }
+
         MethodLinkMetaData metaData = methods.get(method);
         if (metaData != null) {
             return metaData;
@@ -79,15 +83,15 @@ public class ClassLinkMetaData implements Serializable, Attachable<ClassLinkMeta
         if (candidates.isEmpty()) {
             String message = String.format("No method '%s' found for class '%s'.", method, className);
             message += "\nThis problem may happen when some apilink from docbook template xmls refers to unknown method."
-                    +  "\nExample: <apilink class=\"org.gradle.api.Project\" method=\"someMethodThatDoesNotExist\"/>";
+                    + "\nExample: <apilink class=\"org.gradle.api.Project\" method=\"someMethodThatDoesNotExist\"/>";
             throw new RuntimeException(message);
         }
         if (candidates.size() != 1) {
             String message = String.format("Found multiple methods called '%s' in class '%s'. Candidates: %s",
                     method, className, CollectionUtils.join(", ", candidates));
             message += "\nThis problem may happen when some apilink from docbook template xmls is incorrect. Example:"
-                    +  "\nIncorrect: <apilink class=\"org.gradle.api.Project\" method=\"tarTree\"/>"
-                    +  "\nCorrect:   <apilink class=\"org.gradle.api.Project\" method=\"tarTree(Object)\"/>";
+                    + "\nIncorrect: <apilink class=\"org.gradle.api.Project\" method=\"tarTree\"/>"
+                    + "\nCorrect:   <apilink class=\"org.gradle.api.Project\" method=\"tarTree(Object)\"/>";
             throw new RuntimeException(message);
         }
         return candidates.get(0);
@@ -133,7 +137,7 @@ public class ClassLinkMetaData implements Serializable, Attachable<ClassLinkMeta
         }
 
         public String getDisplayName() {
-            return String.format("%s()", name);
+            return signature;
         }
         
         public String getUrlFragment(String className) {

@@ -16,44 +16,41 @@
 
 package org.gradle.api.plugins.antlr;
 
-import org.apache.tools.ant.taskdefs.optional.ANTLR;
-import org.apache.tools.ant.types.Path;
+import org.gradle.api.Action;
 import org.gradle.api.file.FileCollection;
-import org.gradle.api.plugins.antlr.internal.GenerationPlan;
-import org.gradle.api.plugins.antlr.internal.GenerationPlanBuilder;
-import org.gradle.api.plugins.antlr.internal.MetadataExtracter;
-import org.gradle.api.plugins.antlr.internal.XRef;
-import org.gradle.api.tasks.InputFiles;
-import org.gradle.api.tasks.OutputDirectory;
-import org.gradle.api.tasks.SourceTask;
-import org.gradle.api.tasks.TaskAction;
+import org.gradle.api.file.FileTree;
+import org.gradle.api.file.SourceDirectorySet;
+import org.gradle.api.plugins.antlr.internal.*;
+import org.gradle.api.tasks.*;
+import org.gradle.api.tasks.incremental.IncrementalTaskInputs;
+import org.gradle.api.tasks.incremental.InputFileDetails;
+import org.gradle.process.internal.worker.WorkerProcessFactory;
 import org.gradle.util.GFileUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
+import javax.inject.Inject;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * <p>Generates parsers from Antlr grammars.</p>
- *
- * <p>Most properties here are self-evident, but I wanted to highlight one in particular: {@link #setAntlrClasspath} is
- * used to define the classpath that should be passed along to the Ant {@link ANTLR} task as its classpath.  That is the
- * classpath it uses to perform generation execution.  This <b>should</b> really only require the antlr jar.  In {@link
- * AntlrPlugin} usage, this would happen simply by adding your antlr jar into the 'antlr' dependency configuration
- * created and exposed by the {@link AntlrPlugin} itself.</p>
+ * Generates parsers from Antlr grammars.
  */
 public class AntlrTask extends SourceTask {
-    private static final Logger LOGGER = LoggerFactory.getLogger(AntlrTask.class);
 
     private boolean trace;
     private boolean traceLexer;
     private boolean traceParser;
     private boolean traceTreeWalker;
+    private List<String> arguments = new ArrayList<String>();
 
     private FileCollection antlrClasspath;
 
     private File outputDirectory;
+    private String maxHeapSize;
+    private SourceDirectorySet sourceDirectorySet;
 
     /**
      * Specifies that all rules call {@code traceIn}/{@code traceOut}.
@@ -100,6 +97,34 @@ public class AntlrTask extends SourceTask {
     }
 
     /**
+     * The maximum heap size for the forked antlr process (ex: '1g').
+     */
+    public String getMaxHeapSize() {
+        return maxHeapSize;
+    }
+
+    public void setMaxHeapSize(String maxHeapSize) {
+        this.maxHeapSize = maxHeapSize;
+    }
+
+    public void setArguments(List<String> arguments) {
+        if (arguments != null) {
+            this.arguments = arguments;
+        }
+    }
+
+
+    /**
+     * List of command-line arguments passed to the antlr process
+     *
+     * @return The antlr command-line arguments
+     */
+    @Input
+    public List<String> getArguments() {
+        return arguments;
+    }
+
+    /**
      * Returns the directory to generate the parser source files into.
      *
      * @return The output directory.
@@ -133,41 +158,94 @@ public class AntlrTask extends SourceTask {
      *
      * @param antlrClasspath The Ant task implementation classpath. Must not be null.
      */
-    public void setAntlrClasspath(FileCollection antlrClasspath) {
+    protected void setAntlrClasspath(FileCollection antlrClasspath) {
         this.antlrClasspath = antlrClasspath;
     }
 
+    @Inject
+    protected WorkerProcessFactory getWorkerProcessBuilderFactory() {
+        throw new UnsupportedOperationException();
+    }
+
     @TaskAction
-    public void generate() {
-        // Determine the grammar files and the proper ordering amongst them
-        XRef xref = new MetadataExtracter().extractMetadata(getSource());
-        List<GenerationPlan> generationPlans = new GenerationPlanBuilder(outputDirectory).buildGenerationPlans(xref);
-
-        for (GenerationPlan generationPlan : generationPlans) {
-            if (!generationPlan.isOutOfDate()) {
-                LOGGER.info("grammar [" + generationPlan.getId() + "] was up-to-date; skipping");
-                continue;
+    public void execute(IncrementalTaskInputs inputs) {
+        final Set<File> grammarFiles = new HashSet<File>();
+        final Set<File> sourceFiles = getSource().getFiles();
+        final AtomicBoolean cleanRebuild = new AtomicBoolean();
+        inputs.outOfDate(
+            new Action<InputFileDetails>() {
+                public void execute(InputFileDetails details) {
+                    File input = details.getFile();
+                    if (sourceFiles.contains(input)) {
+                        grammarFiles.add(input);
+                    } else {
+                        // classpath change?
+                        cleanRebuild.set(true);
+                    }
+                }
             }
-
-            LOGGER.info("performing grammar generation [" + generationPlan.getId() + "]");
-
-            //noinspection ResultOfMethodCallIgnored
-            GFileUtils.mkdirs(generationPlan.getGenerationDirectory());
-
-            ANTLR antlr = new ANTLR();
-            antlr.setProject(getAnt().getAntProject());
-            Path antlrTaskClasspath = antlr.createClasspath();
-            for (File dep : getAntlrClasspath()) {
-                antlrTaskClasspath.createPathElement().setLocation(dep);
+        );
+        inputs.removed(new Action<InputFileDetails>() {
+            @Override
+            public void execute(InputFileDetails details) {
+                if (details.isRemoved()) {
+                    cleanRebuild.set(true);
+                }
             }
-            antlr.setTrace(trace);
-            antlr.setTraceLexer(traceLexer);
-            antlr.setTraceParser(traceParser);
-            antlr.setTraceTreeWalker(traceTreeWalker);
-            antlr.setOutputdirectory(generationPlan.getGenerationDirectory());
-            antlr.setTarget(generationPlan.getSource());
+        });
+        if (cleanRebuild.get()) {
+            GFileUtils.cleanDirectory(outputDirectory);
+            grammarFiles.addAll(sourceFiles);
+        }
 
-            antlr.execute();
+        AntlrWorkerManager manager = new AntlrWorkerManager();
+        AntlrSpec spec = new AntlrSpecFactory().create(this, grammarFiles, sourceDirectorySet);
+        AntlrResult result = manager.runWorker(getProject().getProjectDir(), getWorkerProcessBuilderFactory(), getAntlrClasspath(), spec);
+        evaluate(result);
+    }
+
+    private void evaluate(AntlrResult result) {
+        int errorCount = result.getErrorCount();
+        if(errorCount < 0) {
+            throw new AntlrSourceGenerationException("There were errors during grammar generation", result.getException());
+        } else if (errorCount == 1) {
+            throw new AntlrSourceGenerationException("There was 1 error during grammar generation", result.getException());
+        } else if (errorCount > 1) {
+            throw new AntlrSourceGenerationException("There were "
+                + errorCount
+                + " errors during grammar generation", result.getException());
         }
     }
+
+    /**
+     * Sets the source for this task. Delegates to {@link SourceTask#setSource(Object)}.
+     *
+     * If the source is of type {@link SourceDirectorySet}, then the relative path of each source grammar files
+     * is used to determine the relative output path of the generated source
+     * If the source is not of type {@link SourceDirectorySet}, then the generated source files end up
+     * flattened in the specified output directory.
+     *
+     * @param source The source.
+     */
+    @Override
+    public void setSource(Object source) {
+        super.setSource(source);
+        if (source instanceof SourceDirectorySet) {
+            this.sourceDirectorySet = (SourceDirectorySet) source;
+        }
+    }
+
+    /**
+     * Returns the source for this task, after the include and exclude patterns have been applied. Ignores source files which do not exist.
+     *
+     * @return The source.
+     */
+    // This method is here as the Gradle DSL generation can't handle properties with setters and getters in different classes.
+    @InputFiles
+    @SkipWhenEmpty
+    public FileTree getSource() {
+        return super.getSource();
+    }
+
+
 }

@@ -16,14 +16,17 @@
 
 package org.gradle.launcher.daemon.client
 
-import org.gradle.messaging.remote.internal.Connection
+import org.gradle.launcher.daemon.context.DaemonInstanceDetails
+import org.gradle.launcher.daemon.protocol.Message
+import org.gradle.internal.remote.internal.MessageIOException
+import org.gradle.internal.remote.internal.RemoteConnection
 import spock.lang.Specification
 
 class DaemonClientConnectionTest extends Specification {
-
-    final delegate = Mock(Connection)
+    final delegate = Mock(RemoteConnection)
+    final daemon = Mock(DaemonInstanceDetails)
     final staleAddressDetector = Mock(DaemonClientConnection.StaleAddressDetector)
-    final connection = new DaemonClientConnection(delegate, 'id', staleAddressDetector)
+    final connection = new DaemonClientConnection(delegate, daemon, staleAddressDetector)
 
     def "stops"() {
         when:
@@ -32,44 +35,42 @@ class DaemonClientConnectionTest extends Specification {
         then:
         1 * delegate.stop()
         0 * staleAddressDetector._
-
-        when:
-        connection.requestStop()
-
-        then:
-        1 * delegate.requestStop()
-        0 * staleAddressDetector._
     }
 
     def "dispatches messages"() {
+        def message = Stub(Message)
+
         when:
-        connection.dispatch("foo")
+        connection.dispatch(message)
 
         then:
-        1 * delegate.dispatch("foo")
+        1 * delegate.dispatch(message)
         0 * staleAddressDetector._
     }
 
     def "receives messages"() {
+        def message = Stub(Message)
+
         given:
-        delegate.receive() >> "bar"
+        delegate.receive() >> message
 
         when:
         def out = connection.receive()
 
         then:
-        "bar" == out
+        out == message
         0 * staleAddressDetector._
     }
 
     def "treats failure to dispatch before receiving as a stale address"() {
+        def message = Stub(Message)
         def failure = new FooException()
 
         given:
-        delegate.dispatch("foo") >> { throw failure }
+        delegate.dispatch(message) >> { throw failure }
 
         when:
-        connection.dispatch("foo")
+        connection.dispatch(message)
 
         then:
         def ex = thrown(StaleDaemonAddressException)
@@ -80,14 +81,15 @@ class DaemonClientConnectionTest extends Specification {
 
     def "handles failed dispatch"() {
         def failure = new FooException()
+        def message = Stub(Message)
 
         given:
-        delegate.receive() >> "result"
-        delegate.dispatch("broken") >> { throw failure }
+        delegate.receive() >> Stub(Message)
+        delegate.dispatch(message) >> { throw failure }
 
         when:
         connection.receive()
-        connection.dispatch("broken")
+        connection.dispatch(message)
 
         then:
         def ex = thrown(DaemonConnectionException)
@@ -116,7 +118,7 @@ class DaemonClientConnectionTest extends Specification {
         def failure = new FooException()
 
         given:
-        1 * delegate.receive() >> "first"
+        1 * delegate.receive() >> Stub(Message)
         delegate.receive() >> { throw failure }
 
         when:
@@ -130,5 +132,9 @@ class DaemonClientConnectionTest extends Specification {
         0 * staleAddressDetector._
     }
 
-    class FooException extends RuntimeException {}
+    class FooException extends MessageIOException {
+        FooException() {
+            super("broken", null)
+        }
+    }
 }

@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 package org.gradle.api.plugins.quality
-
 import org.gradle.api.plugins.quality.internal.AbstractCodeQualityPlugin
 import org.gradle.api.tasks.SourceSet
 
 class CheckstylePlugin extends AbstractCodeQualityPlugin<Checkstyle> {
+    public static final String DEFAULT_CHECKSTYLE_VERSION = "5.9"
     private CheckstyleExtension extension
 
     @Override
@@ -33,11 +33,11 @@ class CheckstylePlugin extends AbstractCodeQualityPlugin<Checkstyle> {
 
     @Override
     protected CodeQualityExtension createExtension() {
-        extension = project.extensions.create("checkstyle", CheckstyleExtension)
+        extension = project.extensions.create("checkstyle", CheckstyleExtension, project)
 
         extension.with {
-            toolVersion = "5.6"
-            configFile = project.file("config/checkstyle/checkstyle.xml")
+            toolVersion = DEFAULT_CHECKSTYLE_VERSION
+            config = project.resources.text.fromFile("config/checkstyle/checkstyle.xml")
         }
 
         return extension
@@ -46,23 +46,23 @@ class CheckstylePlugin extends AbstractCodeQualityPlugin<Checkstyle> {
     @Override
     protected void configureTaskDefaults(Checkstyle task, String baseName) {
         def conf = project.configurations['checkstyle']
-        conf.incoming.beforeResolve {
-            if (conf.dependencies.empty) {
-                conf.dependencies.add(project.dependencies.create("com.puppycrawl.tools:checkstyle:$extension.toolVersion"))
-            }
+        conf.defaultDependencies { dependencies ->
+            dependencies.add(this.project.dependencies.create("com.puppycrawl.tools:checkstyle:${this.extension.toolVersion}"))
         }
 
         task.conventionMapping.with {
             checkstyleClasspath = { conf }
-            configFile = { extension.configFile }
+            config = { extension.config }
             configProperties = { extension.configProperties }
             ignoreFailures = { extension.ignoreFailures }
             showViolations = { extension.showViolations }
         }
 
-        task.reports.xml.conventionMapping.with {
-            enabled = { true }
-            destination = { new File(extension.reportsDir, "${baseName}.xml") }
+        task.reports.all { report ->
+            report.conventionMapping.with {
+                enabled = { true }
+                destination = { new File(extension.reportsDir, "${baseName}.${report.name}") }
+            }
         }
     }
 

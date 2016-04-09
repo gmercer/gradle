@@ -17,16 +17,12 @@
 package org.gradle.api.plugins
 
 import org.gradle.integtests.fixtures.WellBehavedPluginTest
+import org.gradle.test.fixtures.maven.MavenPom
 
 import static org.hamcrest.Matchers.containsString
 
 class DistributionPluginIntegrationTest extends WellBehavedPluginTest {
-
     @Override
-    String getPluginId() {
-        "distribution"
-    }
-
     String getMainTask() {
         return "distZip"
     }
@@ -34,6 +30,7 @@ class DistributionPluginIntegrationTest extends WellBehavedPluginTest {
     def setup() {
         file("settings.gradle").text = "rootProject.name='TestProject'"
         file("someFile").createFile()
+        using m2
     }
 
     def createTaskForCustomDistribution() {
@@ -55,6 +52,42 @@ class DistributionPluginIntegrationTest extends WellBehavedPluginTest {
         and:
         file('build/distributions/TestProject-custom.zip').usingNativeTools().unzipTo(file("unzip"))
         file("unzip/TestProject-custom/someFile").assertIsFile()
+    }
+
+    def "can publish distribution"() {
+        when:
+        buildFile << """
+            apply plugin:'distribution'
+            apply plugin:'maven'
+            group = "org.acme"
+            version = "1.0"
+
+            distributions {
+                main {
+                    contents {
+                        from { "someFile" }
+                    }
+                }
+            }
+
+            uploadArchives {
+                repositories {
+                    mavenDeployer {
+                        repository(url: "${file("repo").toURI()}")
+                    }
+                }
+            }
+            """
+        then:
+        succeeds("uploadArchives")
+        file("repo/org/acme/TestProject/1.0/TestProject-1.0.zip").assertIsFile()
+
+        and:
+        def pom = new MavenPom(file("repo/org/acme/TestProject/1.0/TestProject-1.0.pom"))
+        pom.groupId == "org.acme"
+        pom.artifactId == "TestProject"
+        pom.version == "1.0"
+        pom.packaging == "zip"
     }
 
     def createTaskForCustomDistributionWithCustomName() {
@@ -99,8 +132,6 @@ class DistributionPluginIntegrationTest extends WellBehavedPluginTest {
         failure.assertThatDescription(containsString("Distribution baseName must not be null or empty! Check your configuration of the distribution plugin."))
     }
 
-
-
     def createDistributionWithoutVersion() {
         given:
         createDir('src/main/dist') {
@@ -124,6 +155,32 @@ class DistributionPluginIntegrationTest extends WellBehavedPluginTest {
         run('distZip')
         then:
         file('build/distributions/myDistribution.zip').exists()
+    }
+
+    def assembleAllDistribution() {
+        given:
+        createDir('src/main/dist') {
+            file 'file1.txt'
+            dir2 {
+                file 'file2.txt'
+            }
+        }
+        and:
+        buildFile << """
+            apply plugin:'distribution'
+
+
+            distributions {
+                main{
+                    baseName='myDistribution'
+                }
+            }
+            """
+        when:
+        run('assemble')
+        then:
+        file('build/distributions/myDistribution.zip').exists()
+        file('build/distributions/myDistribution.tar').exists()
     }
 
     def createDistributionWithVersion() {
@@ -326,6 +383,29 @@ class DistributionPluginIntegrationTest extends WellBehavedPluginTest {
                 'dir/file2.txt',
                 'docs/file3.txt',
                 'docs/dir2/file4.txt')
+    }
+
+    def installDistCanBeRerun() {
+        when:
+        buildFile << """
+            apply plugin:'distribution'
+
+            distributions {
+                custom{
+                    contents {
+                        from { "someFile" }
+                    }
+                }
+            }
+
+            """
+        succeeds('installCustomDist')
+        // update the file so that when it re-runs it is not UP-TO-DATE
+        file("someFile") << "updated"
+        then:
+        succeeds('installCustomDist')
+        and:
+        file('build/install/TestProject-custom/someFile').assertIsCopyOf(file("someFile"))
     }
 
     def createTarTaskForCustomDistribution() {

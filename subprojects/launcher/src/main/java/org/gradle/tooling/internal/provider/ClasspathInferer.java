@@ -72,7 +72,7 @@ public class ClasspathInferer {
             return;
         }
 
-        String resourceName = target.getName().replace(".", "/") + ".class";
+        String resourceName = target.getName().replace('.', '/') + ".class";
         URL resource = targetClassLoader.getResource(resourceName);
         try {
             if (resource == null) {
@@ -80,7 +80,7 @@ public class ClasspathInferer {
                 return;
             }
 
-            File classPathRoot = ClasspathUtil.getClasspathForResource(resource, resourceName);
+            File classPathRoot = ClasspathUtil.getClasspathForClass(target);
             dest.add(classPathRoot.toURI().toURL());
 
             // To determine the dependencies of the class, load up the byte code and look for CONSTANT_Class entries in the constant pool

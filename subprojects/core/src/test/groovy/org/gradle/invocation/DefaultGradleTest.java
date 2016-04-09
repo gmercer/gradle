@@ -23,22 +23,26 @@ import org.gradle.api.Action;
 import org.gradle.api.Project;
 import org.gradle.api.ProjectEvaluationListener;
 import org.gradle.api.initialization.dsl.ScriptHandler;
-import org.gradle.api.internal.GradleDistributionLocator;
+import org.gradle.api.internal.AsmBackedClassGenerator;
 import org.gradle.api.internal.file.FileResolver;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
 import org.gradle.api.internal.initialization.ScriptHandlerFactory;
-import org.gradle.api.internal.plugins.PluginRegistry;
+import org.gradle.api.internal.plugins.DefaultPluginManager;
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.invocation.Gradle;
 import org.gradle.api.plugins.PluginContainer;
+import org.gradle.api.plugins.PluginManager;
 import org.gradle.configuration.ScriptPluginFactory;
 import org.gradle.execution.TaskGraphExecuter;
+import org.gradle.initialization.ClassLoaderScopeRegistry;
 import org.gradle.internal.classloader.MultiParentClassLoader;
+import org.gradle.internal.event.ListenerBroadcast;
+import org.gradle.internal.event.ListenerManager;
+import org.gradle.internal.installation.CurrentGradleInstallation;
+import org.gradle.internal.installation.GradleInstallation;
 import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.internal.service.scopes.ServiceRegistryFactory;
 import org.gradle.listener.ClosureBackedMethodInvocationDispatch;
-import org.gradle.listener.ListenerBroadcast;
-import org.gradle.listener.ListenerManager;
 import org.gradle.util.GradleVersion;
 import org.gradle.util.JUnit4GroovyMockery;
 import org.gradle.util.TestUtil;
@@ -51,6 +55,7 @@ import org.junit.runner.RunWith;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Type;
 
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.sameInstance;
@@ -64,19 +69,20 @@ public class DefaultGradleTest {
     private final ScriptHandler scriptHandlerMock = context.mock(ScriptHandler.class);
     private final ServiceRegistryFactory serviceRegistryFactoryMock = context.mock(ServiceRegistryFactory.class, "parent");
     private final ServiceRegistry gradleServiceRegistryMock = context.mock(ServiceRegistry.class, "gradle");
-    private final PluginRegistry pluginRegistry = context.mock(PluginRegistry.class);
     private final TaskGraphExecuter taskExecuter = context.mock(TaskGraphExecuter.class);
     private final ListenerManager listenerManager = context.mock(ListenerManager.class);
     private final Gradle parent = context.mock(Gradle.class, "parentBuild");
     private final MultiParentClassLoader scriptClassLoaderMock = context.mock(MultiParentClassLoader.class);
-    private final GradleDistributionLocator gradleDistributionLocatorMock = context.mock(GradleDistributionLocator.class);
+    private final CurrentGradleInstallation currentGradleInstallationMock = context.mock(CurrentGradleInstallation.class);
     private final ListenerBroadcast<BuildListener> buildListenerBroadcast = new ListenerBroadcast<BuildListener>(BuildListener.class);
     private final ListenerBroadcast<ProjectEvaluationListener> projectEvaluationListenerBroadcast = context.mock(ListenerBroadcast.class);
     private final FileResolver fileResolverMock = context.mock(FileResolver.class);
     private final PluginContainer pluginContainer = context.mock(PluginContainer.class);
     private final ScriptPluginFactory scriptPluginFactory = context.mock(ScriptPluginFactory.class);
     private final ScriptHandlerFactory scriptHandlerFactory = context.mock(ScriptHandlerFactory.class);
+    private final ClassLoaderScopeRegistry classLoaderScopeRegistry = context.mock(ClassLoaderScopeRegistry.class);
     private final ClassLoaderScope classLoaderScope = context.mock(ClassLoaderScope.class);
+    private final PluginManager pluginManager = context.mock(DefaultPluginManager.class);
 
     private DefaultGradle gradle;
 
@@ -85,34 +91,38 @@ public class DefaultGradleTest {
         context.checking(new Expectations() {{
             one(serviceRegistryFactoryMock).createFor(with(any(DefaultGradle.class)));
             will(returnValue(gradleServiceRegistryMock));
-            allowing(gradleServiceRegistryMock).get(ScriptHandler.class);
+            allowing(gradleServiceRegistryMock).get((Type) ScriptHandler.class);
             will(returnValue(scriptHandlerMock));
-            allowing(gradleServiceRegistryMock).get(ClassLoaderScope.class);
+            allowing(gradleServiceRegistryMock).get(ClassLoaderScopeRegistry.class);
+            will(returnValue(classLoaderScopeRegistry));
+            allowing(classLoaderScopeRegistry).getCoreAndPluginsScope();
             will(returnValue(classLoaderScope));
-            allowing(gradleServiceRegistryMock).get(PluginRegistry.class);
-            will(returnValue(pluginRegistry));
-            allowing(gradleServiceRegistryMock).get(TaskGraphExecuter.class);
+            allowing(gradleServiceRegistryMock).get((Type) DefaultPluginManager.class);
+            will(returnValue(pluginManager));
+            allowing(gradleServiceRegistryMock).get((Type) TaskGraphExecuter.class);
             will(returnValue(taskExecuter));
-            allowing(gradleServiceRegistryMock).get(ListenerManager.class);
+            allowing(gradleServiceRegistryMock).get((Type) ListenerManager.class);
             will(returnValue(listenerManager));
             allowing(gradleServiceRegistryMock).get(MultiParentClassLoader.class);
             will(returnValue(scriptClassLoaderMock));
-            allowing(gradleServiceRegistryMock).get(GradleDistributionLocator.class);
-            will(returnValue(gradleDistributionLocatorMock));
+            allowing(gradleServiceRegistryMock).get((Type) CurrentGradleInstallation.class);
+            will(returnValue(currentGradleInstallationMock));
             allowing(gradleServiceRegistryMock).get(PluginContainer.class);
             will(returnValue(pluginContainer));
-            allowing(gradleServiceRegistryMock).get(FileResolver.class);
+            allowing(gradleServiceRegistryMock).get((Type) FileResolver.class);
             will(returnValue(fileResolverMock));
-            allowing(gradleServiceRegistryMock).get(ScriptPluginFactory.class);
+            allowing(gradleServiceRegistryMock).get((Type) ScriptPluginFactory.class);
             will(returnValue(scriptPluginFactory));
-            allowing(gradleServiceRegistryMock).get(ScriptHandlerFactory.class);
+            allowing(gradleServiceRegistryMock).get((Type) ScriptHandlerFactory.class);
             will(returnValue(scriptHandlerFactory));
             allowing(listenerManager).createAnonymousBroadcaster(BuildListener.class);
             will(returnValue(buildListenerBroadcast));
             allowing(listenerManager).createAnonymousBroadcaster(ProjectEvaluationListener.class);
             will(returnValue(projectEvaluationListenerBroadcast));
         }});
-        gradle = new DefaultGradle(parent, parameter, serviceRegistryFactoryMock);
+
+        AsmBackedClassGenerator classGenerator = new AsmBackedClassGenerator();
+        gradle = classGenerator.newInstance(DefaultGradle.class, parent, parameter, serviceRegistryFactoryMock);
     }
 
     @Test
@@ -132,8 +142,8 @@ public class DefaultGradleTest {
         final File gradleHome = new File("home");
 
         context.checking(new Expectations() {{
-            one(gradleDistributionLocatorMock).getGradleHome();
-            will(returnValue(gradleHome));
+            one(currentGradleInstallationMock).getInstallation();
+            will(returnValue(new GradleInstallation(gradleHome)));
         }});
 
         assertThat(gradle.getGradleHomeDir(), equalTo(gradleHome));

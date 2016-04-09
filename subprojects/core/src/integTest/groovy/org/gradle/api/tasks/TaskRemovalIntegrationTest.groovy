@@ -55,34 +55,54 @@ class TaskRemovalIntegrationTest extends AbstractIntegrationSpec {
     }
 
     @Unroll
-    def "cant remove task in after evaluate if task is used by a #ruleClass"() {
+    def "can remove task in after evaluate if task is used by unbound #annotationClass rule"() {
         given:
         buildScript """
-            import org.gradle.model.*
-
             task foo {}
-            task bar {}
 
             afterEvaluate {
                 tasks.remove(foo)
             }
 
-            // No DSL for rules dependent on other model yet
-            project.services.get(ModelRules).rule(new $ruleClass() {
-                void linkFooToBar(@Path("tasks.bar") Task bar, @Path("tasks.foo") Task foo) {
-                    // do nothing
+            class Rules extends RuleSource {
+                @$annotationClass
+                void linkFooToBar(String bar, @Path("tasks.foo") Task foo) {
+                   // do nothing
                 }
-            })
+            }
+
+            apply plugin: Rules
         """
 
         when:
-        fails "foo"
+        fails "dependencies"
 
         then:
-        failure.assertThatCause(Matchers.startsWith("Tried to remove model tasks.foo but it is depended on by other model elements"))
+        failure.assertThatCause(Matchers.startsWith("The following model rules could not be applied"))
 
         where:
-        ruleClass << ["ModelRule", "ModelFinalizer"]
+        annotationClass << ["Defaults", "Mutate", "Finalize", "Validate"]
     }
 
+    def "cant remove task if used by rule"() {
+        when:
+        buildScript """
+            task foo {}
+            task bar { doLast { tasks.remove(foo) } }
+
+            class Rules extends RuleSource {
+                @Mutate
+                void linkFooToBar(@Path("tasks.bar") Task bar, @Path("tasks.foo") Task foo) {
+                   // do nothing
+                }
+            }
+
+            apply plugin: Rules
+        """
+
+        then:
+        fails ":bar"
+        failure.assertThatCause(Matchers.startsWith("Tried to remove model 'tasks.foo' but it is depended on by: 'tasks.bar'"))
+
+    }
 }

@@ -15,13 +15,9 @@
  */
 package org.gradle.integtests.tooling.m5
 
-import org.gradle.integtests.tooling.fixture.TargetGradleVersion
-import org.gradle.integtests.tooling.fixture.ToolingApiVersion
 import org.gradle.integtests.tooling.fixture.ToolingApiSpecification
 import org.gradle.tooling.model.eclipse.EclipseProject
 
-@ToolingApiVersion('>=1.2')
-@TargetGradleVersion(">=1.0-milestone-8")
 class ToolingApiEclipseModelCrossVersionSpec extends ToolingApiSpecification {
     def "eclipse project has access to gradle project and its tasks"() {
 
@@ -39,7 +35,7 @@ project(':impl') {
         file('settings.gradle').text = "include 'api', 'impl'; rootProject.name = 'root'"
 
         when:
-        def root = withConnection { it.getModel(EclipseProject.class) }
+        def root = loadToolingModel(EclipseProject)
 
         then:
         def impl = root.children.find { it.name == 'impl'}

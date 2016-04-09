@@ -31,8 +31,8 @@ import spock.lang.Shared
 @IgnoreIf({ !FunctionalReleaseNotesTest.canReachServices() })
 class FunctionalReleaseNotesTest extends GebReportingSpec {
 
-    static private final String FIXED_ISSUES_URL = "http://services.gradle.org/fixed-issues/${GradleVersion.current().baseVersion.version}"
-    static private final String KNOWN_ISSUES_URL = "http://services.gradle.org/known-issues/${GradleVersion.current().baseVersion.version}"
+    static private final String FIXED_ISSUES_URL = "https://services.gradle.org/fixed-issues/${GradleVersion.current().baseVersion.version}"
+    static private final String KNOWN_ISSUES_URL = "https://services.gradle.org/known-issues/${GradleVersion.current().baseVersion.version}"
 
     private String version = GradleVersion.current().baseVersion.version
 
@@ -88,7 +88,7 @@ class FunctionalReleaseNotesTest extends GebReportingSpec {
             return
         }
 
-        page.fixedIssuesListItems.size() == numFixedIssues
+        waitFor { page.fixedIssuesListItems.size() == numFixedIssues }
         fixed.eachWithIndex { json, i ->
             def issue = page.fixedIssuesListItems[i]
             assert issue.text() == "[$json.key] - ${json.summary}"
@@ -105,7 +105,7 @@ class FunctionalReleaseNotesTest extends GebReportingSpec {
             waitFor { page.knownIssuesParagraph.text() == "There are no known issues of Gradle ${version} at this time." }
             return
         } else {
-            waitFor { page.knownIssuesParagraph.text() == "There are ${knownIssues.size()} known issues of Gradle $version." }
+            waitFor { page.knownIssuesParagraph.text() == "${knownIssues.size()} issues are known to affect Gradle $version." }
         }
 
         page.knownIssuesListItems.size() == knownIssues.size()

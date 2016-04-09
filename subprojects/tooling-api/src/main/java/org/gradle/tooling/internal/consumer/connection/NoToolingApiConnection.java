@@ -17,10 +17,17 @@
 package org.gradle.tooling.internal.consumer.connection;
 
 import org.gradle.tooling.BuildAction;
-import org.gradle.tooling.UnsupportedVersionException;
+import org.gradle.tooling.connection.ModelResult;
 import org.gradle.tooling.internal.consumer.Distribution;
+import org.gradle.tooling.internal.consumer.TestExecutionRequest;
 import org.gradle.tooling.internal.consumer.parameters.ConsumerOperationParameters;
+import org.gradle.tooling.model.internal.Exceptions;
 
+/**
+ * A {@code ConsumerConnection} implementation for a Gradle version that does not support the tooling API.
+ *
+ * <p>Used for versions < 1.0-milestone-3.</p>
+ */
 public class NoToolingApiConnection implements ConsumerConnection {
     private final Distribution distribution;
 
@@ -36,14 +43,19 @@ public class NoToolingApiConnection implements ConsumerConnection {
     }
 
     public <T> T run(Class<T> type, ConsumerOperationParameters operationParameters) throws UnsupportedOperationException, IllegalStateException {
-        throw fail();
+        throw Exceptions.unsupportedFeature(operationParameters.getEntryPointName(), distribution, "1.0-milestone-8");
     }
 
     public <T> T run(BuildAction<T> action, ConsumerOperationParameters operationParameters) throws UnsupportedOperationException, IllegalStateException {
-        throw fail();
+        throw Exceptions.unsupportedFeature(operationParameters.getEntryPointName(), distribution, "1.8");
     }
 
-    private UnsupportedVersionException fail() {
-        return new UnsupportedVersionException(String.format("The specified %s does not implement the tooling API. Support for the tooling API was added in Gradle 1.0-milestone-3 and is available in all later versions.", distribution.getDisplayName()));
+    public void runTests(TestExecutionRequest testExecutionRequest, ConsumerOperationParameters operationParameters) {
+        throw Exceptions.unsupportedFeature(operationParameters.getEntryPointName(), distribution, "2.6");
+    }
+
+    @Override
+    public <T> Iterable<ModelResult<T>> buildModels(Class<T> elementType, ConsumerOperationParameters operationParameters) throws UnsupportedOperationException, IllegalStateException {
+        throw Exceptions.unsupportedFeature(operationParameters.getEntryPointName(), distribution, "2.13");
     }
 }

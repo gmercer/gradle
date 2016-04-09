@@ -17,14 +17,16 @@ package org.gradle.api.tasks.diagnostics;
 
 import org.gradle.api.Project;
 import org.gradle.api.Task;
-import org.gradle.api.UncheckedIOException;
 import org.gradle.api.internal.ConventionTask;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.OutputFile;
 import org.gradle.api.tasks.TaskAction;
+import org.gradle.api.tasks.diagnostics.internal.ProjectReportGenerator;
+import org.gradle.api.tasks.diagnostics.internal.ReportGenerator;
 import org.gradle.api.tasks.diagnostics.internal.ReportRenderer;
-import org.gradle.logging.StyledTextOutputFactory;
+import org.gradle.initialization.BuildClientMetaData;
+import org.gradle.internal.logging.StyledTextOutputFactory;
 
 import javax.inject.Inject;
 import java.io.File;
@@ -39,7 +41,7 @@ import java.util.TreeSet;
 public abstract class AbstractReportTask extends ConventionTask {
     private File outputFile;
 
-    // todo annotate as required 
+    // todo annotate as required
     private Set<Project> projects;
 
     protected AbstractReportTask() {
@@ -53,30 +55,27 @@ public abstract class AbstractReportTask extends ConventionTask {
     }
 
     @Inject
+    protected BuildClientMetaData getClientMetaData() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Inject
     protected StyledTextOutputFactory getTextOutputFactory() {
         throw new UnsupportedOperationException();
     }
 
     @TaskAction
     public void generate() {
-        try {
-            ReportRenderer renderer = getRenderer();
-            File outputFile = getOutputFile();
-            if (outputFile != null) {
-                renderer.setOutputFile(outputFile);
-            } else {
-                renderer.setOutput(getTextOutputFactory().create(getClass()));
-            }
-            Set<Project> projects = new TreeSet<Project>(getProjects());
-            for (Project project : projects) {
-                renderer.startProject(project);
+        ProjectReportGenerator projectReportGenerator = new ProjectReportGenerator() {
+            @Override
+            public void generateReport(Project project) throws IOException {
                 generate(project);
-                renderer.completeProject(project);
             }
-            renderer.complete();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        };
+
+        ReportGenerator reportGenerator = new ReportGenerator(getRenderer(), getClientMetaData(), getOutputFile(),
+                getTextOutputFactory(), projectReportGenerator);
+        reportGenerator.generateReport(new TreeSet<Project>(getProjects()));
     }
 
     protected abstract ReportRenderer getRenderer();

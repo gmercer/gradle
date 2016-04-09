@@ -22,7 +22,6 @@ dependencies {
 
     compile project(':scala')
     compile project(':core')
-    compile project(':launcher')
     compile project(':plugins')
     compile project(':ear')
     compile project(':toolingApi')
@@ -30,7 +29,7 @@ dependencies {
     compile libraries.inject
 
     testCompile libraries.xmlunit
-    testCompile project(':coreImpl')
+    testCompile project(':dependencyManagement')
 }
 
 useTestFixtures()

@@ -42,7 +42,7 @@ public class WarPlugin implements Plugin<Project> {
     public static final String WEB_APP_GROUP = "web application";
 
     public void apply(final Project project) {
-        project.getPlugins().apply(JavaPlugin.class);
+        project.getPluginManager().apply(JavaPlugin.class);
         final WarPluginConvention pluginConvention = new WarPluginConvention(project);
         project.getConvention().getPlugins().put("war", pluginConvention);
 

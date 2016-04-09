@@ -1,610 +1,288 @@
 
-This spec describes some work to allow plugins to define the kinds of components that they produce and consume.
-
-## A note on terminology
-
-There is currently a disconnect in the terminology used for the dependency management component model, and that used
-for the component model provided by the native plugins.
-
-The dependency management model uses the term `component instance` or `component` to refer to what is known as a `binary`
-in the native model. A `component` in the native model doesn't really have a corresponding concept in the dependency
-management model (a `module` is the closest we have, and this is not the same thing).
+This spec outlines work required to introduce dependency management for JVM based components.
 
-Part of the work for this spec is to unify the terminology. This is yet to be defined.
+# Approach
 
-For now, this spec uses the terminology from the native component model, using `binary` to refer to what is also
-known as a `component instance` or `variant`.
+The goal is to support dependency graphs made up of components built from Java source, that depend on other components
+which present some Java API.
 
-# Features
+Specifically the following components that consume some other library:
 
-## Feature: Build author creates a JVM library with Java sources
+- Java library
+- Custom library or application built from Java
 
-### Story: Build author defines JVM library
+And the following producers:
 
-#### DSL
+- Java library
+- Custom library that provides a Java API
 
-Project defining single jvm libraries
+An example:
 
-    apply plugin: 'jvm-component'
+<img src="img/jvm_dependency_management.png"/>
 
-    libraries {
-        main(JvmLibrary)
-    }
+External components are out of scope for this work.
 
-Project defining multiple jvm libraries
+The work can be broken down into:
 
-    apply plugin: 'jvm-component'
+1. An initial DSL to declare the dependencies of a Java source set owned by a Java library.
+2. A basic implementation to honour these dependencies at compile time. Only for local Java libraries that consume other Java libraries.
+3. Allow a custom component to be built from Java source with dependencies. Only consume local Java libraries.
+4. Allow a custom component to provide a Java API. Can consume from Java libraries and custom components.
+5. Support multiple variants of a Java library or custom component.
 
-    libraries {
-        main(JvmLibrary)
-        extra(JvmLibrary)
-    }
+Later work:
 
-Combining native and jvm libraries in single project
+1. Declare the API dependencies of a Java library.
+2. Support for runtime dependencies.
+3. TBD - reporting, etc.
 
-    apply plugin: 'jvm-component'
-    apply plugin: 'native-component'
+# Completed work
 
-    libraries {
-        myNativeLib(NativeLibrary)
-        myJvmLib(JvmLibrary)
-    }
+- Feature 1: Build author declares dependencies of Java library
+- Feature 2: Custom component built from Java source
 
-#### Implementation plan
+[Done](done/dependency-management-for-jvm-components.md)
 
-- Introduce `org.gradle.jvm.JvmLibrary`
-- Rename `org.gradle.nativebinaries.Library` to `org.gradle.nativebinaries.NativeLibrary`
-    - Similar renames for `Executable`, `TestSuite` and all related classes
-- Introduce a common superclass for `Library`.
-- Extract `org.gradle.nativebinaries.LibraryContainer` out of `nativebinaries` project into `language-base` project,
-  and make it an extensible polymorphic container.
-    - Different 'library' plugins will register a factory for library types.
-- Add a `jvm-component` plugin, that:
-    - Registers support for `JvmLibrary`.
-    - Adds a single `JvmLibraryBinary` instance to the `binaries` container for every `JvmLibrary`
-    - Creates a binary lifecycle task for generating this `JvmLibraryBinary`
-    - Wires the binary lifecycle task into the main `assemble` task.
-- Rename `NativeBinariesPlugin` to `NativeComponentPlugin` with id `native-component`.
-- Move `Binary` and `ClassDirectoryBinary` to live with the runtime support classes (and not the language support classes)
-- Extract a common supertype `Application` for NativeExecutable, and a common supertype `Component` for `Library` and `Application`
-- Introduce a 'filtered' view of the ExtensiblePolymorphicDomainObjectContainer, such that only elements of a particular type are returned
-  and any element created is given that type.
-    - Add a backing 'components' container that contains all Library and Application elements
-    - Replace 'libraries' with 'nativeLibraries' and 'jvmLibraries':  filtered views on 'components'
-        - Remove support for creating a library element without a type
-    - Replace current 'executables' container with a filtered view over 'components', named 'nativeExecutables'
-    - Use the 'components' container in native code where currently must iterate separately over 'libraries' and 'executables'
+## Open issues
 
-#### Test cases
+- Dependency container is not reachable through a public API.
+- We should have some validation around unmanaged types overriding managed types.
+- Need to test that a managed property of type `ModelMap<ModelMap<UnmanagedType>>` throws an error.
 
-- Can apply `jvm-component` plugin without defining library
-    - No binaries defined
-    - No lifecycle task added
-- Define a jvm library component
-    - `JvmLibraryBinary` added to binaries container
-    - Lifecycle task available to build binary: skipped when no sources for binary
-    - Binary is buildable: can add dependent tasks which are executed when building binary
-- Define and build multiple java libraries in the same project
-  - Build library jars individually using binary lifecycle task
-  - `gradle assemble` builds single jar for each library
-- Can combine native and JVM libraries in the same project
-  - `gradle assemble` executes lifecycle tasks for each native library and each jvm library
+## Feature backlog
 
-#### Open issues
+- Allow library to expose Jar, classes dir or any combination as its Java API.
+- Allow plugin to use compiled classes from a Java source set to build a custom binary.
+- Plugin declares Jar or classes as intermediate output rather than final output.
+- Add dependency set to JarBinarySpec to allow dependencies to be tweaked.
+- Expose a way to query the resolved compile classpath for a Java source set.
+- Plugin author defines target Java platform for Jar binary
+- Change language transforms implementation to fail at configuration time when no rule is available to transform a given input source set for a binary.
+    - This will require using `LanguageTransform`s in Scala
+    - Windows resource sets on non-windows builds fail with the current `LanguageTransform.applyToBinary()` implementation
+- Fail when no rule is available to define the tasks for a `BinarySpec`.
+    - Will need to change `@BinaryTasks` implementation to fail at configuration time when no rule is available to build a given binary.
 
-- Come up with a better name for JvmLibraryBinary, or perhaps add a `JarBinary` subtype
-- Remove the need to declare the library type, rather than making it explicit: Possibly based on available types, possibly by naming the container?
-- Consider splitting jvm-runtime & jvm-lang support into separate projects. Similar for native-runtime and native-lang.
-- Consider splitting up `assemble` into various lifecycle tasks. There are several use cases:
-    - As a developer, build me a binary I can play with or test in some way.
-    - As part of some workflow, build all binaries that should be possible to build in this specific environment. Fail if a certain binary cannot be built.
-      For example, if I'm on Windows build all the Windows variants and fail if the Windows SDK (with 64bit support) is not installed.
-      Or, if I'm building for Android, fail if the SDK is not installed.
-    - Build everything. Fail if a certain binary cannot be built.
 
-### Story: Build author creates JVM library jar from Java sources
+# Feature: Java library consumes external Java library
+## Story: Build author defines dependencies for an entire component
 
-When a JVM library is defined with Java language support, then binary is built from conventional source set locations:
+- Extend the JvmLibrarySpec DSL with a component scoped `dependencies` block with support for the usual dependency selectors:
 
-- Has a single Java source set hardcoded to `src/myLib/java`
-- Has a single resources source set hardcoded to `src/myLib/resources`
-
-#### DSL
-
-Java library using conventional source locations
-
-    apply plugin: 'jvm-component'
-    apply plugin: 'java-lang'
-
-    libraries {
-        myLib(JvmLibrary)
-    }
-
-
-Combining jvm-java and native (multi-lang) libraries in single project
-
-    apply plugin: 'jvm-component'
-    apply plugin: 'java-lang'
-
-    apply plugin: 'native-component'
-    apply plugin: 'cpp-lang'
-    apply plugin: 'c-lang'
-
-    libraries {
-        myNativeLib(NativeLibrary)
-        myJvmLib(JvmLibrary)
-    }
-
-#### Implementation plan
-
-- Replace the current 'java-lang' plugin with a simpler one that does not know about legacy conventions
-- For each JvmLibrary:
-    - Adds a single ResourceSet for 'src/${component}/resources'
-    - Adds a single JavaSourceSet for 'src/${component}/java'
-- Each created JvmLibraryBinary has the source sets of it's JvmLibrary
-- Create a ProcessResources task for each ResourceSet for a JvmLibraryBinary
-    - copy resources to `build/classes/${binaryName}`
-- Create a CompileJava task for each JavaSourceSet for a JvmLibraryBinary
-    - compile classes to `build/classes/${binaryName}`
-- Create a Jar task for each JvmLibraryBinary
-    - produce jar file at `build/binaries/${binaryName}/${componentName}.jar
-- Rejig the native language plugins so that '*-lang' + 'native-components' is sufficient to apply language support
-    - Existing 'cpp', 'c', etc plugins will simply apply '*-lang' and 'native-components'
-
-#### Test cases
-
-- Define and build the jar for a java library (assert jar contents for each case)
-    - With no sources or resources
-    - With sources but no resources
-    - With resources but no sources
-    - With both sources and resources
-- Reports failure to compile source
-- Compiled sources and resources are available in a common directory
-- All generated resources are removed when all resources source files are removed.
-- Can build native and JVM libraries in the same project
-  - `gradle assemble` builds each native library and each jvm library
-
-#### Open issues
-
-- Need `groovy-lang` and `scala-lang` plugins
-- All compiled classes are removed when all java source files are removed.
-
-### Story: Legacy JVM language plugins declare a jvm library
-
-#### Test cases
-
-- JVM library with name `main` is defined with any combination of `java`, `groovy` and `scala` plugins applied
-- Can build legacy jvm library jar using standard lifecycle task
-
-#### Open issues
-
-- The legacy application plugin should also declare a jvm application.
-
-## Feature: Custom plugin defines a custom library type
-
-### Story: plugin declares its own library type
-
-Add a sample plugin that declares a custom library type:
-
-    apply plugin: 'my-sample'
-
-    mySample {
-        // can use its own DSL
-        ...
-    }
-
-    // Library is also visible in libraries container
-    assert libraries.withType(SampleLibrary).size() == 1
-
-A custom library type:
-- Extends or implements some public base `Library` type.
-- Has no dependencies.
-- Produces no artifacts.
-
-### Story: Custom library produces custom binaries
-
-Change the sample plugin so that it declares its own binary type for the libraries it defines:
-
-    apply plugin: 'my-sample'
-
-    mySample {
-        // can use its own DSL
-        ...
-    }
-
-    // Binaries are also visible in the binaries container
-    assert binaries.withType(SampleBinary).size() == 2
-
-Allow a plugin to declare the binaries for a custom library.
-
-A custom binary:
-- Extends or implements some public base `LibraryBinary` type.
-- Has some lifecycle task to build its outputs.
-
-Running `gradle assemble` will build each library binary.
-
-### Story: Custom binary is build from Java sources
-
-Change the sample plugin so that it compiles Java source to produce its binaries
-
-- Uses same conventions as a Java library.
-- No dependencies.
-
-## Feature: Build author declares that a Java library depends on a Java library produced by another project
-
-For example:
-
-    apply plugin: 'new-java'
-
-    libraries {
-        myLib {
+```groovy
+model {
+    components {
+        A(JvmLibrarySpec) {
             dependencies {
-                project 'other-project' // Infer the target library
-                project 'other-project' library 'my-lib'
+                library "B"
+            }
+            sources {
+                core(JavaSourceSet) {
+                    source.srcDir "src/core"
+                }
+            }
+        }
+        B(JvmLibrarySpec) {
+        }
+        C(JvmLibrarySpec) {
+            dependencies {
+                library "A"
             }
         }
     }
+}
+```
 
-When the project attribute refers to a project with a component plugin applied:
+- When library A declares a component level dependency on library B, defined in the same project or a different one, then:
+    - library B is considered part of the compile classpath of all source sets in library A
+    - the API of library B is _not_ considered part of the API of library A unless an explicit api dependency is also declared (which renders the component level dependency redundant)
 
-- Select the target library from the libraries of the project. Assert that there is exactly one matching JVM library.
-- At compile time, include the library's jar binary only.
-- At runtime time, include the library's jar binary and runtime dependencies.
+### Test cases
 
-When the project attribute refers to a project without a component plugin applied:
+- Given the example above:
+    - ~~source files in all source sets of A can reference public types from library B~~
+    - ~~source files in C fail to compile if they reference public types from library B~~
+    - ~~same tests above for a library B defined in a different project~~
+    - ~~same tests above given A declares component level dependencies on both libraries, B from the same project and B from a different project~~
+- Given a library dependency declared at both the component and api levels:
+    - ~~source files in all source sets can reference public types from said library~~
+    - ~~the API of said library is considered part of the API of the consuming library~~
+- Given a library dependency declared at both the component and source set levels:
+    - ~~source files in all source sets can reference public types from said library~~
+    - ~~the API of said library is _not_ considered part of the API of the consuming library~~
+- Given a library dependency for a library which cannot be found:
+    - ~~compilation should fail with a suitable error message pointing to the dependency declaration~~
 
-- At compile and runtime, include the artifacts and dependencies from the `default` configuration.
+## Story: Java library sources are compiled against library Jar resolved from Maven repository
 
-### Open issues
+- Extend the dependency DSL to reference external modules:
 
-- Should be able to depend on a library in the same project.
-- Need an API to query the various classpaths.
-- Need to be able to configure the resolution strategy for each usage.
-
-## Feature: Build author declares that a Java library depends on an external Java library
-
-For example:
-
-    apply plugin: 'new-java'
-
-    libraries {
-        myLib {
-            dependencies {
-                library "myorg:mylib:2.3"
-            }
-        }
-    }
-
-This makes the jar of `myorg:mylib:2.3` and its dependencies available at both compile time and runtime.
-
-### Open issues
-
-- Using `library "some:thing:1.2"` will conflict with a dependency `library "someLib"` on a library declared in the same project.
-Could potentially just assert that component names do not contain ':' (should do this anyway).
-
-## Feature: Build author declares that legacy Java project depends on a Java library produced by another project
-
-For example:
-
-    apply plugin: 'java'
-
-    dependencies {
-        compile project: 'other-project'
-    }
-
-When the project attribute refers to a project with a component plugin applied:
-
-- Select the target library from the libraries of the project. Assert that there is exactly one JVM library.
-- At compile time, include the library's jar binary only.
-- At runtime time, include the library's jar binary and runtime dependencies.
-
-### Open issues
-
-- Allow `library` attribute?
-
-## Feature: Build user views the dependencies for the Java libraries of a project
-
-The dependency reports show the dependencies of the Java libraries of a project:
-
-- `dependencies` task
-- `dependencyInsight` task
-- HTML report
-
-## Feature: Build author declares that a native component depends on a native library
-
-Add the ability to declare dependencies directly on a native component, using a similar DSL as for Java libraries:
-
-    apply plugin: 'cpp'
-
-    libraries {
-        myLib {
-            dependencies {
-                project 'other-project'
-                library 'my-prebuilt'
-                library 'local-lib' linkage 'api'
-            }
-        }
-    }
-
-Also reuse the dependency DSL at the source set level:
-
-    apply plugin: 'cpp'
-
-    libraries {
-        myLib
-    }
-
-    sources {
-        myLib {
-            java {
+    ```groovy
+    model {
+        components {
+            main(JvmLibrarySpec) {
                 dependencies {
-                    project 'other-project'
-                    library 'my-lib' linkage 'api'
+                    // external module spec can start with either group or module
+                    group 'com.acme' module 'artifact' version '1.0'
+                    module 'artifact' group 'com.acme' version '1.0'
+
+                    // shorthand module id syntax
+                    module 'com.acme:collections:1.42'
+
+                    // passing a module id to library should fail
+                    library 'com.acme:collections:1.42'
+
+                    // existing usage remains
+                    project ':foo' library 'bar'
+                    library 'bar' project ':foo'
                 }
             }
         }
     }
+    ```
 
-## Feature: Build author declares that the API of a Java library requires some Java library
+- Reuse existing repositories DSL, bridging into model space.
+- Main Jar artifact of maven module is included in compile classpath.
+- Main Jar artifact of any compile-scoped dependencies are included transitively in the compile classpath.
+- Assume external library is compatible with all target platforms.
+- Assume external library declares only one variant.
+- Update samples and user guide
+- Update newJavaModel performance test?
 
-For example:
+### Test cases
 
-    apply plugin: 'new-java'
+- For maven module dependencies
+    - ~~Main Jar artifact of module is included in compile classpath.~~
+    - ~~Main Jar artifact of compile-scoped transitive dependencies are included in the compile classpath.~~
+    - ~~Artifacts from runtime-scoped (and other scoped) transitive dependencies are _not_ included in the compile classpath.~~
+- For local component dependencies:
+    - ~~Artifacts from transitive external dependencies that are non part of component API are _not_ included in the compile classpath.~~
+- ~~Displays a reasonable error message if the external dependency cannot be found in a declared repository~~
+- ~~Displays a reasonable error message if a module id is given to `library`~~
 
-    libraries {
-        myLib {
-            dependencies {
-                api {
-                    project 'other-project' library 'other-lib'
-                }
-            }
-        }
+### Out of scope
+
+- Rule-based definition of repositories
+- Support for custom `ResolutionStrategy`: forced versions, dependency substitution, etc
+
+## Story: Build author defines repositories using model rules
+
+## Story: Plugin author can specialize how a custom component is shown in the components report
+
+### Motivation
+
+The need for this story came about as @lptr and I were investigating how to get the components report to show the API level and component level dependencies of a java library (`JvmLibrarySpec`).
+
+We've discovered there was no mechanism already in place that would let us specialize the reporting behavior for subtypes of `ComponentSpec` although such a mechanism does exist for subtypes of `BinarySpec` via the `TypeAwareBinaryRenderer` class.
+
+At the same time we were reviewing the tidying up of NodeInitializer semantics and found [some code](https://github.com/gradle/gradle/blob/45d3d3fbb8855638bb797ac34ec792f74aafca2b/subprojects/model-core/src/main/java/org/gradle/model/internal/core/DefaultNodeInitializerRegistry.java#L41) dealing with the same problem in a slightly different way using a chain-of-responsibility.
+
+So here they are, three instances of the same and very common problem. So common in fact that is deserving of its own name, *the expression problem*.
+
+Having slightly different solutions in different modules to the same basic problem adds unnecessary complexity and worse, keeps these subsystems closed to extension by plugin authors.
+
+We should devise a solution to the expression problem suitable to our setting and apply it uniformly throughout.
+
+As food for thought here's a sketch of how one of my favorite solutions to the expression problem, protocols as introduced by clojure, could let plugin authors extend behavior to the different types in a hierarchy.
+
+```java
+
+interface PrettyPrinter<T> {
+    PrettyDocument print(T subject);
+}
+
+class PrettyPrinterProtocolRules extends RuleSource {
+
+    /***
+     * Extends the PrettyPrinter protocol to the ComponentSpec type (and subtypes) relying on the PrettyPrinter
+     * for LanguageSourceSet to pretty print the component sources.
+     */
+    @Protocol PrettyPrinter<ComponentSpec> componentPrettyPrinter(PrettyPrinter<LanguageSourceSet> sourceSetPrinter) {
+        // Calling `sourceSetPrinter.print(sourceSet)` where `sourceSet` is a `JavaLanguageSourceSet`
+        // would trigger the version of the protocol specialized to `JavaLanguageSourceSet` declared below.
+        return new PrettyPrinter { ... };
     }
 
-This makes the API of the library 'other-lib' available at compile time, and the runtime artifacts and dependencies of 'other-lib' available at
-runtime.
-
-It also exposes the API of the library 'other-lib' as part of the API for 'myLib', so that it is visible at compile time for any other component that
-depends on 'myLib'.
-
-The default API of a Java library is its Jar file and no dependencies.
-
-### Open issues
-
-- Add this to native libraries
-
-## Feature: Build author declares that a Java library requires some Java library at runtime
-
-For example:
-
-    apply plugin: 'new-java'
-
-    libraries {
-        myLib {
-            dependencies {
-                runtime {
-                    project 'other-project' library 'other-lib'
-                }
-            }
-        }
+    /***
+     * Extends the PrettyPrinter protocol to the JvmLibrarySpec type (and subtypes) delegating common
+     * behavior to the ComponentSpec PrettyPrinter acquired via the Protocol definition / meta type.
+     */
+    @Protocol PrettyPrinter<JvmLibrarySpec> jvmLibraryPrettyPrinter(Protocol<PrettyPrinter<?>> prettyPrinterProtocol) {
+        final PrettyPrinter<ComponentSpec> base = prettyPrinterProtocol.specializedTo(ComponentSpec.class);
+        // Calling `base.print(component)` where `component` is a `JvmLibrarySpec` would still trigger
+        // the `ComponentSpec` version of the protocol defined above.
+        // A call to `prettyPrinterProtocol.specializedTo(JvmLibrarySpec.class)` here would be invalid as it leads to a cycle.
+        return new PrettyPrinter { ... };
     }
 
-### Open issues
-
-- Add this to native libraries
-
-## Feature: Build author declares the target JVM for a Java library
-
-For example:
-
-    apply plugin: 'new-java'
-
-    platforms {
-        // Java versions are visible here
+    /***
+     * Extends the PrettyPrinter protocol to the JavaSourceSet type (and subtypes).
+     */
+    @Protocol PrettyPrinter<JavaLanguageSourceSet> javaLanguageSourceSetPrettyPrinter() {
+        return new PrettyPrinter { ... };
     }
+}
+```
 
-    libraries {
-        myLib {
-            buildFor platforms.java7
-        }
-    }
+## Story: Components report shows component level and api level dependencies of a Java Library
 
-This declares that the bytecode for the binary should be generated for Java 7, and should be compiled against the Java 7 API.
-Assume that the source also uses Java 7 language features.
+### Implementation
 
-When a library `a` depends on another library `b`, assert that the target JVM for `b` is compatible with the target JVM for `a` - that is
-JVM for `a` is same or newer thatn the JVM for `b`.
+The implementation will rely on the extension mechanism defined in `Plugin author can specialize how a custom component is shown in the components report` to specialize how `JvmLibrarySpec` components are shown in the report.
 
-The target JVM for a legacy Java library is the lowest of `sourceCompatibility` and `targetCompatibility`.
+### Test cases
 
-### Open issues
+- Report shows component level dependencies
+- Report shows api dependencies
 
-- Need to discover or configure the JDK installations.
 
-## Feature: Build author declares a custom target platform for a Java library
+## Story: Resolve external dependencies from Ivy repositories
 
-For example:
+- Use artifacts and dependencies from some conventional configuration (eg `compile`, or `default` if not present) an for Ivy module.
 
-    apply plugin: 'new-java'
+## Story: Generate a stubbed API jar for external dependencies
 
-    platforms {
-        myContainer {
-            runsOn platforms.java6
-            provides {
-                library 'myorg:mylib:1.2'
-            }
-        }
-    }
+- Generate stubbed API for external Jar and use this for compilation. Cache the generated stubbed API jar.
+- Verify library is not recompiled when API of external library has not changed (eg method body change, add private element).
+- Dependencies report shows external libraries in compile time dependency graph.
 
-    libraries {
-        myLib {
-            buildFor platforms.myContainer
-        }
-    }
+### Implementation
 
-This defines a custom container that requires Java 6 or later, and states that the library should be built for that container.
+Should reuse the "stub generator" that is used to create an API jar for local projects.
 
-This includes the API of 'myorg:mylib:1.2' at compile time, but not at runtime. The bytecode for the library is compiled for java 6.
+### Test cases
 
-When a library `a` depends on another library `b`, assert that both libraries run on the same platform, or that `b` targets a JVM compatible with
-the JVM for the platform of `a`.
+- Dependent classes are not recompiled when method implementation of external dependency has changed
+- Dependent classes are recompiled when signature of external dependency has changed
 
-### Open issues
 
-- Rework the platform DSL for native component to work the same way.
-- Retrofit into legacy java and web plugins.
+# Feature: Fully featured dependency resolution for local Java libraries
 
-## Feature: Build author declares dependencies for a Java source set
+- Declare and consume API & runtime dependencies
+    - ~Need to declare transitive API dependencies~
+    - ~Consumes API dependencies at compile time~
+    - Consumes runtime dependencies at runtime
+    - Handle compile time cycles.
+- Improvements to dependency management
+    - Declare dependencies at component, source set and binary level
+    - Allow a `LibrarySpec` instance to be added as a dependency.
+    - Make dependency declarations managed and immutable post resolve
+- Fully featured dependency resolution
+    - API to query the various resolved classpaths
+    - Configure the resolution strategy for each usage
+    - Configure resolution rules for each usage
+    - Wire in dependency resolution events
+    - Include in dependency reports
 
-For example:
+# Feature: Legacy JVM language plugins declare and consume JVM library
 
-    apply plugin: 'new-java'
+- JVM component can consume legacy JVM project
+- Legacy JVM project can consume JVM library
+- Change dependency reporting to present project as a JVM component
 
-    libraries {
-        myLib {
-            source {
-                java {
-                    runsOn platforms.java7
-                    dependencies {
-                        project 'some-project'
-                        library 'myorg:mylib:1.2'
-                        runtime {
-                            ...
-                        }
-                    }
-                }
-            }
-        }
-    }
+# Feature: Domain specific usages
 
-Will have to move source sets live with the library domain object.
-
-### Open issues
-
-- Fail or skip if target platform is not applicable for the the component's platform?
-
-## Feature: Build author declares dependencies for custom library
-
-Change the sample plugin so that it allows Java and custom libraries to be used as dependencies:
-
-    apply plugin: 'my-sample'
-
-    libraries {
-        myCustomLib {
-            dependencies {
-                project 'other-project'
-                customUsage {
-                    project 'other-project' library 'some-lib'
-                }
-            }
-        }
-    }
-
-Allow a plugin to resolve the dependencies for a custom library, via some API. Target library must produce exactly
-one binary of the target type.
-
-Move the hard-coded Java library model out of the dependency management engine and have the jvm plugins define the
-Java library type.
-
-Resolve dependencies with inline notation:
-
-    def compileClasspath = dependencies.newDependencySet()
-                .withType(JvmLibrary.class)
-                .withUsage(Usage.COMPILE)
-                .forDependencies("org.group:module:1.0", ...) // Any dependency notation, or dependency instances
-                .create()
-
-    compileTask.classPath = compileClasspath.files
-    assert compileClasspath.files == compileClasspath.artifactResolutionResult.files
-
-Resolve dependencies based on a configuration:
-
-    def testRuntimeUsage = dependencies.newDependencySet()
-                .withType(JvmLibrary.class)
-                .withUsage(Usage.RUNTIME)
-                .forDependencies(configurations.test.incoming.dependencies)
-                .create()
-    copy {
-        from testRuntimeUsage.artifactResolutionResult.artifactFiles
-        into "libs"
-    }
-
-    testRuntimeUsage.resolutionResult.allDependencies { dep ->
-        println dep.requested
-    }
-
-Resolve dependencies not added a configuration:
-
-    dependencies {
-        def lib1 = create("org.group:mylib:1.+") {
-            transitive false
-        }
-        def projectDep = project(":foo")
-    }
-    def deps = dependencies.newDependencySet()
-                .withType(JvmLibrary)
-                .withUsage(Usage.RUNTIME)
-                .forDependencies(lib1, projectDep)
-                .create()
-    deps.files.each {
-        println it
-    }
-
-### Open issues
-
-- Component type declares usages.
-- Binary declares artifacts and dependencies for a given usage.
-
-## Feature: Build user views the dependencies for the custom libraries of a project
-
-Change the `dependencies`, `dependencyInsight` and HTML dependencies report so that it can report
-on the dependencies of a custom component, plus whatever binaries the component happens to produce.
-
-## Feature: Build author declares target platform for custom library
-
-Change the sample plugin to allow a target JVM based platform to be declared:
-
-    apply plugin: 'my-sample'
-
-    platforms {
-        // Several target platforms are visible here
-    }
-
-    libraries {
-        myCustomLib {
-            minSdk 12 // implies: buildFor platforms.mySdk12
-        }
-    }
-
-## Feature: Java library produces multiple variants
-
-For example:
-
-    apply plugin: 'new-java'
-
-    libraries {
-        myLib {
-            buildFor platforms.java6, platforms.java8
-        }
-    }
-
-Builds a binary for Java 6 and Java 8.
-
-Dependency resolution selects the best binary from each dependency for the target platform.
-
-## Feature: Dependency resolution for native components
-
-## Feature: Build user views the dependencies for the native components of a project
-
-# Open issues and Later work
-
-- Should use rules mechanism.
-- Expose the source and javadoc artifacts for local binaries.
-- Reuse the local component and binary meta-data for publication.
-    - Version the meta-data schemas.
-    - Source and javadoc artifacts.
-- Legacy war and ear plugins define binaries.
-- Java component plugins support variants.
-- Gradle runtime defines Gradle plugin as a type of jvm component, and Gradle as a container that runs-on the JVM.
-- Deprecate and remove support for resolution via configurations.
-- Add a report that shows the details for the components and binaries produced by a project.
+- Custom component declares additional usages and associated dependencies.
+- Custom binary provides additional usages
+- Reporting
+- use component model terminology in error messages and exception class names.

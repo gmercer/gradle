@@ -16,15 +16,18 @@
 package org.gradle.api.plugins.quality
 
 import org.gradle.api.GradleException
+import org.gradle.api.Incubating
 import org.gradle.api.file.FileCollection
 import org.gradle.api.internal.project.IsolatedAntBuilder
 import org.gradle.api.logging.LogLevel
 import org.gradle.api.plugins.quality.internal.CodeNarcReportsImpl
 import org.gradle.api.reporting.Report
 import org.gradle.api.reporting.Reporting
+import org.gradle.api.resources.TextResource
 import org.gradle.api.tasks.*
+import org.gradle.internal.classpath.DefaultClassPath
 import org.gradle.internal.reflect.Instantiator
-import org.gradle.logging.ConsoleRenderer
+import org.gradle.internal.logging.ConsoleRenderer
 
 import javax.inject.Inject
 
@@ -39,10 +42,13 @@ class CodeNarc extends SourceTask implements VerificationTask, Reporting<CodeNar
     FileCollection codenarcClasspath
 
     /**
-     * The CodeNarc configuration file to use.
+     * The CodeNarc configuration to use. Replaces the {@code configFile} property.
+     *
+     * @since 2.2
      */
-    @InputFile
-    File configFile
+    @Incubating
+    @Nested
+    TextResource config
 
     /**
      * The maximum number of priority 1 violations allowed before failing the build.
@@ -74,6 +80,20 @@ class CodeNarc extends SourceTask implements VerificationTask, Reporting<CodeNar
         reports = instantiator.newInstance(CodeNarcReportsImpl, this)
     }
 
+    /**
+     * The CodeNarc configuration file to use.
+     */
+    File getConfigFile() {
+        getConfig()?.asFile()
+    }
+
+    /**
+     * The CodeNarc configuration file to use.
+     */
+    void setConfigFile(File configFile) {
+        setConfig(project.resources.text.fromFile(configFile))
+    }
+
     @Inject
     Instantiator getInstantiator() {
         throw new UnsupportedOperationException();
@@ -87,7 +107,8 @@ class CodeNarc extends SourceTask implements VerificationTask, Reporting<CodeNar
     @TaskAction
     void run() {
         logging.captureStandardOutput(LogLevel.INFO)
-        antBuilder.withClasspath(getCodenarcClasspath()).execute {
+        def classpath = new DefaultClassPath(getCodenarcClasspath())
+        antBuilder.withClasspath(classpath.asFiles).execute {
             ant.taskdef(name: 'codenarc', classname: 'org.codenarc.ant.CodeNarcTask')
             try {
                 ant.codenarc(ruleSetFiles: "file:${getConfigFile()}", maxPriority1Violations: getMaxPriority1Violations(), maxPriority2Violations: getMaxPriority2Violations(), maxPriority3Violations: getMaxPriority3Violations()) {

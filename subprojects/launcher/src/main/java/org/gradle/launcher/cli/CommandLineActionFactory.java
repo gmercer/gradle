@@ -16,7 +16,6 @@
 package org.gradle.launcher.cli;
 
 import groovy.lang.GroovySystem;
-import org.apache.ivy.Ivy;
 import org.apache.tools.ant.Main;
 import org.gradle.BuildExceptionReporter;
 import org.gradle.api.Action;
@@ -29,15 +28,15 @@ import org.gradle.initialization.BuildLayoutParameters;
 import org.gradle.initialization.LayoutCommandLineConverter;
 import org.gradle.internal.Actions;
 import org.gradle.internal.jvm.Jvm;
-import org.gradle.internal.nativeplatform.services.NativeServices;
+import org.gradle.internal.logging.LoggingConfiguration;
+import org.gradle.internal.logging.LoggingManagerInternal;
+import org.gradle.internal.logging.LoggingServiceRegistry;
+import org.gradle.internal.logging.StyledTextOutputFactory;
+import org.gradle.internal.logging.internal.LoggingCommandLineConverter;
+import org.gradle.internal.nativeintegration.services.NativeServices;
 import org.gradle.internal.os.OperatingSystem;
 import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.launcher.bootstrap.ExecutionListener;
-import org.gradle.logging.LoggingConfiguration;
-import org.gradle.logging.LoggingManagerInternal;
-import org.gradle.logging.LoggingServiceRegistry;
-import org.gradle.logging.StyledTextOutputFactory;
-import org.gradle.logging.internal.LoggingCommandLineConverter;
 import org.gradle.util.GradleVersion;
 
 import java.io.PrintStream;
@@ -64,15 +63,18 @@ public class CommandLineActionFactory {
 
         LoggingConfiguration loggingConfiguration = new LoggingConfiguration();
 
-        return new ExceptionReportingAction(
-                new WithLogging(loggingServices, args, loggingConfiguration,
-                        new ParseAndBuildAction(loggingServices, args)),
-                new BuildExceptionReporter(loggingServices.get(StyledTextOutputFactory.class), loggingConfiguration, clientMetaData()));
+        return new WithLogging(loggingServices,
+                args,
+                loggingConfiguration,
+                new ExceptionReportingAction(
+                        new JavaRuntimeValidationAction(
+                                new ParseAndBuildAction(loggingServices, args)),
+                        new BuildExceptionReporter(loggingServices.get(StyledTextOutputFactory.class), loggingConfiguration, clientMetaData())));
     }
 
     protected void createActionFactories(ServiceRegistry loggingServices, Collection<CommandLineAction> actions) {
         actions.add(new GuiActionsFactory());
-        actions.add(new BuildActionsFactory(loggingServices));
+        actions.add(new BuildActionsFactory(loggingServices, new ParametersConverter()));
     }
 
     private static GradleLauncherMetaData clientMetaData() {
@@ -99,12 +101,12 @@ public class CommandLineActionFactory {
             parser.option(VERSION, "version").hasDescription("Print version info.");
         }
 
-        public Action<? super ExecutionListener> createAction(CommandLineParser parser, ParsedCommandLine commandLine) {
+        public Runnable createAction(CommandLineParser parser, ParsedCommandLine commandLine) {
             if (commandLine.hasOption(HELP)) {
-                return Actions.toAction(new ShowUsageAction(parser));
+                return new ShowUsageAction(parser);
             }
             if (commandLine.hasOption(VERSION)) {
-                return Actions.toAction(new ShowVersionAction());
+                return new ShowVersionAction();
             }
             return null;
         }
@@ -156,8 +158,6 @@ public class CommandLineActionFactory {
             sb.append(GroovySystem.getVersion());
             sb.append("\nAnt:          ");
             sb.append(Main.getAntVersion());
-            sb.append("\nIvy:          ");
-            sb.append(Ivy.getIvyVersion());
             sb.append("\nJVM:          ");
             sb.append(Jvm.current());
             sb.append("\nOS:           ");
@@ -201,11 +201,13 @@ public class CommandLineActionFactory {
             LoggingManagerInternal loggingManager = loggingServices.getFactory(LoggingManagerInternal.class).create();
             loggingManager.setLevel(loggingConfiguration.getLogLevel());
             loggingManager.start();
-
-            NativeServices.initialize(buildLayout.getGradleUserHomeDir());
-            loggingManager.attachConsole(loggingConfiguration.isColorOutput());
-
-            action.execute(executionListener);
+            try {
+                NativeServices.initialize(buildLayout.getGradleUserHomeDir());
+                loggingManager.attachProcessConsole(loggingConfiguration.getConsoleOutput());
+                action.execute(executionListener);
+            } finally {
+                loggingManager.stop();
+            }
         }
     }
 
@@ -241,9 +243,9 @@ public class CommandLineActionFactory {
 
         private Action<? super ExecutionListener> createAction(Iterable<CommandLineAction> factories, CommandLineParser parser, ParsedCommandLine commandLine) {
             for (CommandLineAction factory : factories) {
-                Action<? super ExecutionListener> action = factory.createAction(parser, commandLine);
+                Runnable action = factory.createAction(parser, commandLine);
                 if (action != null) {
-                    return action;
+                    return Actions.toAction(action);
                 }
             }
             throw new UnsupportedOperationException("No action factory for specified command-line arguments.");

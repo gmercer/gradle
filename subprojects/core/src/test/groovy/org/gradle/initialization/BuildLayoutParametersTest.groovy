@@ -23,7 +23,7 @@ import org.gradle.util.SetSystemProperties
 import org.junit.Rule
 import spock.lang.Specification
 
-import static org.gradle.util.GFileUtils.canonicalise
+import static org.gradle.internal.FileUtils.canonicalize
 
 class BuildLayoutParametersTest extends Specification {
 
@@ -34,8 +34,10 @@ class BuildLayoutParametersTest extends Specification {
         expect:
         def params = new BuildLayoutParameters()
         params.searchUpwards
-        params.gradleUserHomeDir == canonicalise(BuildLayoutParameters.DEFAULT_GRADLE_USER_HOME)
-        params.projectDir == canonicalise(SystemProperties.getCurrentDir())
+        params.gradleUserHomeDir == canonicalize(BuildLayoutParameters.DEFAULT_GRADLE_USER_HOME)
+        params.currentDir == canonicalize(SystemProperties.instance.getCurrentDir())
+        params.projectDir == null
+        params.searchDir == params.currentDir
     }
 
     def "reads gradle user home dir from system property"() {

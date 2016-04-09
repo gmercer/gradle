@@ -17,19 +17,30 @@
 package org.gradle.api.publish.ivy.internal;
 
 import org.gradle.api.internal.artifacts.ivyservice.IvyContextManager;
+import org.gradle.api.internal.component.ArtifactType;
+import org.gradle.api.internal.component.ComponentTypeRegistry;
 import org.gradle.api.publish.ivy.internal.publisher.ContextualizingIvyPublisher;
 import org.gradle.api.publish.ivy.internal.publisher.DependencyResolverIvyPublisher;
 import org.gradle.api.publish.ivy.internal.publisher.IvyPublisher;
 import org.gradle.api.publish.ivy.internal.publisher.ValidatingIvyPublisher;
 import org.gradle.internal.service.ServiceRegistration;
 import org.gradle.internal.service.scopes.PluginServiceRegistry;
+import org.gradle.ivy.IvyDescriptorArtifact;
+import org.gradle.ivy.IvyModule;
 
 public class IvyPublishServices implements PluginServiceRegistry {
     public void registerGlobalServices(ServiceRegistration registration) {
         registration.addProvider(new GlobalServices());
     }
 
+    public void registerBuildSessionServices(ServiceRegistration registration) {
+    }
+
     public void registerBuildServices(ServiceRegistration registration) {
+        registration.addProvider(new ComponentRegistrationAction());
+    }
+
+    public void registerGradleServices(ServiceRegistration registration) {
     }
 
     public void registerProjectServices(ServiceRegistration registration) {
@@ -40,6 +51,14 @@ public class IvyPublishServices implements PluginServiceRegistry {
             IvyPublisher publisher = new DependencyResolverIvyPublisher();
             publisher = new ValidatingIvyPublisher(publisher);
             return new ContextualizingIvyPublisher(publisher, ivyContextManager);
+        }
+    }
+
+    private static class ComponentRegistrationAction {
+        public void configure(ServiceRegistration registration, ComponentTypeRegistry componentTypeRegistry) {
+            // TODO There should be a more explicit way to execute an action against existing services
+            componentTypeRegistry.maybeRegisterComponentType(IvyModule.class)
+                    .registerArtifactType(IvyDescriptorArtifact.class, ArtifactType.IVY_DESCRIPTOR);
         }
     }
 }

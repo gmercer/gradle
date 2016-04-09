@@ -15,17 +15,15 @@
  */
 package org.gradle.api.internal.artifacts;
 
+import org.gradle.api.artifacts.ConfigurationContainer;
 import org.gradle.api.artifacts.dsl.DependencyHandler;
 import org.gradle.api.artifacts.dsl.RepositoryHandler;
-import org.gradle.api.internal.artifacts.configurations.ConfigurationContainerInternal;
-import org.gradle.plugin.resolve.internal.PluginResolver;
 
 public interface DependencyResolutionServices {
     RepositoryHandler getResolveRepositoryHandler();
 
-    ConfigurationContainerInternal getConfigurationContainer();
+    ConfigurationContainer getConfigurationContainer();
 
     DependencyHandler getDependencyHandler();
 
-    PluginResolver getPluginPortalResolver();
 }

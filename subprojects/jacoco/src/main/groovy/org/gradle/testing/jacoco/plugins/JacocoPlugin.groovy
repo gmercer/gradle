@@ -18,6 +18,7 @@ package org.gradle.testing.jacoco.plugins
 import org.gradle.api.Incubating
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.internal.project.ProjectInternal
 import org.gradle.api.plugins.JavaPlugin
 import org.gradle.api.plugins.ReportingBasePlugin
 import org.gradle.api.reporting.Report
@@ -35,7 +36,7 @@ import javax.inject.Inject
  * Plugin that provides support for generating Jacoco coverage data.
  */
 @Incubating
-class JacocoPlugin implements Plugin<Project> {
+class JacocoPlugin implements Plugin<ProjectInternal> {
     static final String AGENT_CONFIGURATION_NAME = 'jacocoAgent'
     static final String ANT_CONFIGURATION_NAME = 'jacocoAnt'
     static final String PLUGIN_EXTENSION_NAME = 'jacoco'
@@ -52,8 +53,8 @@ class JacocoPlugin implements Plugin<Project> {
         this.instantiator = instantiator
     }
 
-    void apply(Project project) {
-        project.plugins.apply(ReportingBasePlugin)
+    void apply(ProjectInternal project) {
+        project.pluginManager.apply(ReportingBasePlugin)
         this.project = project
         addJacocoConfigurations()
         JacocoAgentJar agent = instantiator.newInstance(JacocoAgentJar, project)
@@ -116,10 +117,8 @@ class JacocoPlugin implements Plugin<Project> {
     private void configureAgentDependencies(JacocoAgentJar jacocoAgentJar, JacocoPluginExtension extension) {
         def config = this.project.configurations[AGENT_CONFIGURATION_NAME]
         jacocoAgentJar.conventionMapping.agentConf = { config }
-        config.incoming.beforeResolve {
-            if (config.dependencies.empty) {
-                config.dependencies.add(this.project.dependencies.create("org.jacoco:org.jacoco.agent:${extension.toolVersion}"))
-            }
+        config.defaultDependencies { dependencies ->
+            dependencies.add(this.project.dependencies.create("org.jacoco:org.jacoco.agent:${extension.toolVersion}"))
         }
     }
 
@@ -133,10 +132,8 @@ class JacocoPlugin implements Plugin<Project> {
         this.project.tasks.withType(JacocoBase) { task ->
             task.conventionMapping.jacocoClasspath = { config }
         }
-        config.incoming.beforeResolve {
-            if (config.dependencies.empty) {
-                config.dependencies.add(this.project.dependencies.create("org.jacoco:org.jacoco.ant:${extension.toolVersion}"))
-            }
+        config.defaultDependencies { dependencies ->
+            dependencies.add(this.project.dependencies.create("org.jacoco:org.jacoco.ant:${extension.toolVersion}"))
         }
     }
 

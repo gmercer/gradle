@@ -16,12 +16,6 @@
 package org.gradle.tooling;
 
 import org.gradle.api.Incubating;
-import org.gradle.tooling.exceptions.UnsupportedBuildArgumentException;
-import org.gradle.tooling.exceptions.UnsupportedOperationConfigurationException;
-
-import java.io.File;
-import java.io.InputStream;
-import java.io.OutputStream;
 
 /**
  * A {@code ModelBuilder} allows you to fetch a snapshot of some model for a project or a build.
@@ -68,60 +62,31 @@ import java.io.OutputStream;
  * @param <T> The type of model to build
  * @since 1.0-milestone-3
  */
-public interface ModelBuilder<T> extends LongRunningOperation {
+public interface ModelBuilder<T> extends ConfigurableLauncher<ModelBuilder<T>> {
 
     /**
-     * {@inheritDoc}
-     * @since 1.0
-     */
-    ModelBuilder<T> withArguments(String ... arguments);
-
-    /**
-     * {@inheritDoc}
-     * @since 1.0-milestone-3
-     */
-    ModelBuilder<T> setStandardOutput(OutputStream outputStream);
-
-    /**
-     * {@inheritDoc}
-     * @since 1.0-milestone-3
-     */
-    ModelBuilder<T> setStandardError(OutputStream outputStream);
-
-    /**
-     * {@inheritDoc}
-     * @since 1.0-milestone-7
-     */
-    ModelBuilder<T> setStandardInput(InputStream inputStream);
-
-    /**
-     * {@inheritDoc}
-     * @since 1.0-milestone-8
-     */
-    ModelBuilder<T> setJavaHome(File javaHome);
-
-    /**
-     * {@inheritDoc}
-     * @since 1.0-milestone-9
-     */
-    ModelBuilder<T> setJvmArguments(String... jvmArguments);
-
-    /**
-     * {@inheritDoc}
-     * @since 1.0-milestone-3
-     */
-    ModelBuilder<T> addProgressListener(ProgressListener listener);
-
-    /**
-     * Specifies the tasks to execute before building the model. By default, no tasks are executed.
+     * Specifies the tasks to execute before building the model.
+     *
+     * If not configured, null, or an empty array is passed, then no tasks will be executed.
      *
      * @param tasks The paths of the tasks to be executed. Relative paths are evaluated relative to the project for which this launcher was created.
      * @return this
-     *
      * @since 1.2
      */
     @Incubating
     ModelBuilder<T> forTasks(String... tasks);
+
+    /**
+     * Specifies the tasks to execute before building the model.
+     *
+     * If not configured, null, or an empty array is passed, then no tasks will be executed.
+     *
+     * @param tasks The paths of the tasks to be executed. Relative paths are evaluated relative to the project for which this launcher was created.
+     * @return this
+     * @since 2.6
+     */
+    @Incubating
+    ModelBuilder<T> forTasks(Iterable<String> tasks);
 
     /**
      * Fetch the model, blocking until it is available.
@@ -129,17 +94,16 @@ public interface ModelBuilder<T> extends LongRunningOperation {
      * @return The model.
      * @throws UnsupportedVersionException When the target Gradle version does not support building models.
      * @throws UnknownModelException When the target Gradle version or build does not support the requested model.
-     * @throws UnsupportedOperationConfigurationException
-     *          When the target Gradle version does not support some requested configuration option such as
-     *          {@link #setStandardInput(java.io.InputStream)}, {@link #setJavaHome(java.io.File)},
-     *          {@link #setJvmArguments(String...)}.
-     * @throws UnsupportedBuildArgumentException When there is a problem with build arguments provided by {@link #withArguments(String...)}.
+     * @throws org.gradle.tooling.exceptions.UnsupportedOperationConfigurationException
+     *          When the target Gradle version does not support some requested configuration option such as {@link #withArguments(String...)}.
+     * @throws org.gradle.tooling.exceptions.UnsupportedBuildArgumentException When there is a problem with build arguments provided by {@link #withArguments(String...)}.
      * @throws BuildException On some failure executing the Gradle build.
+     * @throws BuildCancelledException When the operation was cancelled before it completed successfully.
      * @throws GradleConnectionException On some other failure using the connection.
      * @throws IllegalStateException When the connection has been closed or is closing.
      * @since 1.0-milestone-3
      */
-    T get() throws GradleConnectionException, UnsupportedVersionException, UnknownModelException, UnsupportedOperationConfigurationException, BuildException, IllegalStateException, UnsupportedBuildArgumentException;
+    T get() throws GradleConnectionException, IllegalStateException;
 
     /**
      * Starts fetching the model, passing the result to the given handler when complete. This method returns immediately, and the result is later passed to the given

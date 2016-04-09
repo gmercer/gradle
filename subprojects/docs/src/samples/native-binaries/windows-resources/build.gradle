@@ -3,31 +3,28 @@ apply plugin: 'cpp'
 apply plugin: 'windows-resources'
 // END SNIPPET apply-plugin
 
-nativeLibraries {
-    hello {}
-}
+model {
+    components {
+        hello(NativeLibrarySpec)
+        main(NativeExecutableSpec) {
+            sources {
+                cpp {
+                    lib library: 'hello'
+                }
+            }
+        }
+    }
 
-nativeExecutables {
-    main {}
-}
+    binaries {
+        all {
+            linker.args "user32.lib"
+        }
 
-sources {
-    main {
-        cpp {
-            lib libraries.hello
+        // For any shared library binaries built with Visual C++, define the DLL_EXPORT macro
+        withType(SharedLibraryBinarySpec) {
+            if (toolChain in VisualCpp) {
+                cppCompiler.define "DLL_EXPORT"
+            }
         }
     }
 }
-
-binaries.all {
-    linker.args "user32.lib"
-}
-
-// For any shared library binaries built with Visual C++, define the DLL_EXPORT macro
-binaries.withType(SharedLibraryBinary) {
-    if (toolChain in VisualCpp) {
-        cppCompiler.define "DLL_EXPORT"
-    }
-}
-
-

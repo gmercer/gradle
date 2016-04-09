@@ -16,7 +16,6 @@
 package org.gradle.configuration.project;
 
 import org.gradle.api.internal.project.ProjectInternal;
-import org.gradle.api.internal.project.ProjectScript;
 import org.gradle.configuration.ScriptPlugin;
 import org.gradle.configuration.ScriptPluginFactory;
 import org.gradle.util.Clock;
@@ -32,13 +31,13 @@ public class BuildScriptProcessor implements ProjectConfigureAction {
     }
 
     public void execute(ProjectInternal project) {
-        LOGGER.info(String.format("Evaluating %s using %s.", project, project.getBuildScriptSource().getDisplayName()));
+        LOGGER.info("Evaluating {} using {}.", project, project.getBuildScriptSource().getDisplayName());
         Clock clock = new Clock();
         try {
-            ScriptPlugin configurer = configurerFactory.create(project.getBuildScriptSource(), project.getBuildscript(), project.getClassLoaderScope(), "buildscript", ProjectScript.class, true);
+            ScriptPlugin configurer = configurerFactory.create(project.getBuildScriptSource(), project.getBuildscript(), project.getClassLoaderScope(), project.getBaseClassLoaderScope(), true);
             configurer.apply(project);
         } finally {
-            LOGGER.debug("Timing: Running the build script took " + clock.getTime());
+            LOGGER.debug("Timing: Running the build script took {}", clock.getTime());
         }
     }
 }

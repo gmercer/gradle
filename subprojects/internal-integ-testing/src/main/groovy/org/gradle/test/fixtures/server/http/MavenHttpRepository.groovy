@@ -38,16 +38,16 @@ class MavenHttpRepository implements MavenRepository, HttpRepository {
     }
 
     URI getUri() {
-        return new URI("http://localhost:${server.port}${contextPath}")
+        return new URI("${server.uri}${contextPath}")
     }
 
     HttpResource getModuleMetaData(String groupId, String artifactId) {
         return module(groupId, artifactId).rootMetaData
     }
 
-    void expectDirectoryListGet(String groupId, String artifactId) {
+    HttpDirectoryResource directory(String groupId, String artifactId) {
         def path = "${groupId.replace('.', '/')}/$artifactId/"
-        server.expectGetDirectoryListing("$contextPath/$path", backingRepository.getRootDir().file(path))
+        return new HttpDirectoryResource(server, "$contextPath/$path", backingRepository.getRootDir().file(path))
     }
 
     MavenHttpModule module(String groupId, String artifactId) {

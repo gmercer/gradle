@@ -18,8 +18,10 @@ package org.gradle.performance.results
 
 import org.gradle.performance.ResultSpecification
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.junit.Rule
 
+@LeaksFileHandles
 class ReportGeneratorTest extends ResultSpecification {
     @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
     final ReportGenerator generator = new ReportGenerator()
@@ -28,8 +30,8 @@ class ReportGeneratorTest extends ResultSpecification {
 
     def "generates report"() {
         setup:
-        def store = new ResultsStore(dbFile)
-        def result2 = results()
+        def store = new CrossVersionResultsStore(dbFile)
+        def result2 = crossVersionResults()
         result2.current << operation()
         result2.current << operation()
         store.report(result2)

@@ -58,11 +58,7 @@
             </tr>
             <tr>
                 <td>force</td>
-                <td><literal>never</literal></td>
-            </tr>
-            <tr>
-                <td>targetCompatibility</td>
-                <td><literal>1.5</literal></td>
+                <td><literal>false</literal></td>
             </tr>
             <tr>
                 <td>additionalParameters</td>

@@ -15,7 +15,9 @@
  */
 package org.gradle.api.internal
 
+import com.google.common.collect.Sets
 import org.gradle.api.Action
+import org.gradle.api.GradleException
 import org.gradle.api.InvalidUserDataException
 import org.gradle.api.Named
 import org.gradle.api.NamedDomainObjectFactory
@@ -29,7 +31,7 @@ class DefaultPolymorphicDomainObjectContainerTest extends Specification {
     def agedFred = new DefaultAgeAwarePerson(name: "fred", age: 42)
     def agedBarney = new DefaultAgeAwarePerson(name: "barney", age: 42)
 
-    def container = new DefaultPolymorphicDomainObjectContainer<Person>(Person, new DirectInstantiator())
+    def container = new DefaultPolymorphicDomainObjectContainer<Person>(Person, DirectInstantiator.INSTANCE)
 
     interface Person extends Named {}
 
@@ -97,6 +99,7 @@ class DefaultPolymorphicDomainObjectContainerTest extends Specification {
         container.findByName("barney") == barney
         container.asDynamicObject.getProperty("fred") == fred
         container.asDynamicObject.getProperty("barney") == barney
+        container.createableTypes == Collections.singleton(Person)
     }
 
     def "maybe create elements without specifying type"() {
@@ -113,7 +116,7 @@ class DefaultPolymorphicDomainObjectContainerTest extends Specification {
     }
 
     def "throws meaningful exception if it doesn't support creating domain objects without specifying a type"() {
-        container = new DefaultPolymorphicDomainObjectContainer<Person>(Person, new DirectInstantiator())
+        container = new DefaultPolymorphicDomainObjectContainer<Person>(Person, DirectInstantiator.INSTANCE)
 
         when:
         container.create("fred")
@@ -157,7 +160,7 @@ class DefaultPolymorphicDomainObjectContainerTest extends Specification {
     }
 
     def "create elements with specified type based on type binding"() {
-        container = new DefaultPolymorphicDomainObjectContainer<?>(Object, new DirectInstantiator(),
+        container = new DefaultPolymorphicDomainObjectContainer<?>(Object, DirectInstantiator.INSTANCE,
                 { it instanceof Named ? it.name : "unknown" } as Named.Namer)
 
         container.registerBinding(UnnamedPerson, DefaultUnnamedPerson)
@@ -177,6 +180,7 @@ class DefaultPolymorphicDomainObjectContainerTest extends Specification {
             it.getClass() == DefaultCtorNamedPerson
             name == "barney"
         }
+        container.createableTypes == Sets.newHashSet(UnnamedPerson, CtorNamedPerson)
     }
 
     def "maybe create elements with specified type"() {
@@ -190,6 +194,7 @@ class DefaultPolymorphicDomainObjectContainerTest extends Specification {
         container.size() == 1
         container.findByName("fred") == fred
         first == second
+        container.createableTypes == Sets.newHashSet(Person)
     }
 
     def "throws meaningful exception if element with same name exists with incompatible type"() {
@@ -205,7 +210,7 @@ class DefaultPolymorphicDomainObjectContainerTest extends Specification {
     }
 
     def "throws meaningful exception if it doesn't support creating domain objects with the specified type"() {
-        container = new DefaultPolymorphicDomainObjectContainer<Person>(Person, new DirectInstantiator())
+        container = new DefaultPolymorphicDomainObjectContainer<Person>(Person, DirectInstantiator.INSTANCE)
 
         when:
         container.create("fred", Person)
@@ -246,5 +251,16 @@ class DefaultPolymorphicDomainObjectContainerTest extends Specification {
 
         expect:
         container.findAll { it != fred } == [barney] as Set
+    }
+
+    def "cannot register factory for already registered type"() {
+        given:
+        container.registerFactory(Person, { new DefaultPerson(name: it) })
+        when:
+        container.registerFactory(Person, { new DefaultPerson(name: it) })
+
+        then:
+        def e = thrown(GradleException)
+        e.message == "Cannot register a factory for type Person because a factory for this type is already registered."
     }
 }

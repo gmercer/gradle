@@ -18,12 +18,10 @@ package org.gradle.integtests.tooling.r12rc1
 
 import org.gradle.integtests.tooling.fixture.TargetGradleVersion
 import org.gradle.integtests.tooling.fixture.ToolingApiSpecification
-import org.gradle.integtests.tooling.fixture.ToolingApiVersion
 import org.gradle.tooling.ProjectConnection
 import org.gradle.tooling.exceptions.UnsupportedOperationConfigurationException
 import org.gradle.tooling.model.eclipse.EclipseProject
 
-@ToolingApiVersion(">=1.2")
 @TargetGradleVersion(">=1.0-milestone-8 <=1.1")
 class UnsupportedOperationFeedbackCrossVersionSpec extends ToolingApiSpecification {
     def "fails when attempting to run tasks when building a model"() {
@@ -34,6 +32,6 @@ class UnsupportedOperationFeedbackCrossVersionSpec extends ToolingApiSpecificati
 
         then:
         UnsupportedOperationConfigurationException e = thrown()
-        e.message.contains('Unsupported configuration: modelBuilder.forTasks().')
+        e.message.contains("The version of Gradle you are using (${targetDist.version.version}) does not support the ModelBuilder API forTasks() configuration option. Support for this is available in Gradle 1.2 and all later versions.")
     }
 }

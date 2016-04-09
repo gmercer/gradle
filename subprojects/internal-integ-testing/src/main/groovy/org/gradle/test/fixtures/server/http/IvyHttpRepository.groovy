@@ -37,7 +37,7 @@ class IvyHttpRepository implements RemoteIvyRepository, HttpRepository {
     }
 
     URI getUri() {
-        return new URI("http://localhost:${server.port}${contextPath}")
+        return new URI("${server.uri}${contextPath}")
     }
 
     String getIvyPattern() {
@@ -48,24 +48,8 @@ class IvyHttpRepository implements RemoteIvyRepository, HttpRepository {
         return "$uri/${backingRepository.baseArtifactPattern}"
     }
 
-    void allowDirectoryListGet(String organisation, String module) {
-        server.allowGetDirectoryListing("$contextPath/$organisation/$module/", backingRepository.module(organisation, module, "1.0").moduleDir.parentFile)
-    }
-
-    void expectDirectoryListGet(String organisation, String module) {
-        server.expectGetDirectoryListing("$contextPath/$organisation/$module/", backingRepository.module(organisation, module, "1.0").moduleDir.parentFile)
-    }
-
-    void expectDirectoryList(String organisation, String module) {
-        expectDirectoryListGet(organisation, module)
-    }
-
-    void expectDirectoryListGetMissing(String organisation, String module) {
-        server.expectGetMissing("$contextPath/$organisation/$module/")
-    }
-
-    void expectDirectoryListGetBroken(String organisation, String module) {
-        server.expectGetBroken("$contextPath/$organisation/$module/")
+    HttpDirectoryResource directoryList(String organisation, String module) {
+        return new HttpDirectoryResource(server, "$contextPath/$organisation/$module/", backingRepository.moduleDir(organisation, module))
     }
 
     IvyHttpModule module(String organisation, String module, Object revision = "1.0") {

@@ -16,6 +16,7 @@
 
 package org.gradle.api.internal;
 
+import org.gradle.api.Action;
 import org.gradle.api.Task;
 import org.gradle.api.internal.tasks.ContextAwareTaskAction;
 import org.gradle.api.internal.tasks.TaskExecuter;
@@ -23,7 +24,7 @@ import org.gradle.api.internal.tasks.TaskStateInternal;
 import org.gradle.api.internal.tasks.execution.TaskValidator;
 import org.gradle.api.specs.Spec;
 import org.gradle.internal.Factory;
-import org.gradle.logging.StandardOutputCapture;
+import org.gradle.internal.logging.StandardOutputCapture;
 import org.gradle.util.Configurable;
 
 import java.io.File;
@@ -39,8 +40,6 @@ public interface TaskInternal extends Task, Configurable<Task> {
 
     void execute();
 
-    void executeWithoutThrowingTaskFailure();
-
     StandardOutputCapture getStandardOutputCapture();
 
     TaskExecuter getExecuter();
@@ -53,11 +52,22 @@ public interface TaskInternal extends Task, Configurable<Task> {
 
     void addValidator(TaskValidator validator);
 
-    TaskStateInternal getStateInternal();
+    TaskStateInternal getState();
+
+    boolean getImpliesSubProjects();
+
+    void setImpliesSubProjects(boolean impliesSubProjects);
+
     /**
      * The returned factory is expected to return the same file each time.
      * <p>
      * The getTemporaryDir() method creates the directory which can be problematic. Use this to delay that creation.
      */
     Factory<File> getTemporaryDirFactory();
+
+    void prependParallelSafeAction(Action<? super Task> action);
+
+    void appendParallelSafeAction(Action<? super Task> action);
+
+    boolean isHasCustomActions();
 }

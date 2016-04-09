@@ -16,9 +16,9 @@
 
 package org.gradle.internal.text;
 
-import org.gradle.logging.StyledTextOutput;
-import org.gradle.logging.internal.AbstractStyledTextOutput;
-import org.gradle.logging.internal.LinePrefixingStyledTextOutput;
+import org.gradle.internal.logging.StyledTextOutput;
+import org.gradle.internal.logging.internal.AbstractStyledTextOutput;
+import org.gradle.internal.logging.internal.LinePrefixingStyledTextOutput;
 import org.gradle.util.TreeVisitor;
 
 public class TreeFormatter extends TreeVisitor<String> {
@@ -80,7 +80,7 @@ public class TreeFormatter extends TreeVisitor<String> {
             node.prefix = node.isRoot() ? "" : node.parent.prefix + "    ";
         }
 
-        StyledTextOutput output = new LinePrefixingStyledTextOutput(original, node.prefix);
+        StyledTextOutput output = new LinePrefixingStyledTextOutput(original, node.prefix, false);
         if (!node.valueWritten) {
             output.append(node.parent.prefix);
             output.append("  - ");

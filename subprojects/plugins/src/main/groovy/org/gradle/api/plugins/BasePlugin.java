@@ -19,7 +19,6 @@ package org.gradle.api.plugins;
 import org.gradle.api.Action;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
-import org.gradle.api.Task;
 import org.gradle.api.artifacts.*;
 import org.gradle.api.artifacts.repositories.IvyArtifactRepository;
 import org.gradle.api.internal.ConventionMapping;
@@ -31,10 +30,11 @@ import org.gradle.api.internal.artifacts.ivyservice.projectmodule.ProjectPublica
 import org.gradle.api.internal.plugins.BuildConfigurationRule;
 import org.gradle.api.internal.plugins.DefaultArtifactPublicationSet;
 import org.gradle.api.internal.plugins.UploadRule;
+import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.tasks.Upload;
 import org.gradle.api.tasks.bundling.AbstractArchiveTask;
-import org.gradle.api.tasks.bundling.Jar;
 import org.gradle.configuration.project.ProjectConfigurationActionContainer;
+import org.gradle.jvm.tasks.Jar;
 import org.gradle.language.base.plugins.LifecycleBasePlugin;
 
 import javax.inject.Inject;
@@ -62,7 +62,7 @@ public class BasePlugin implements Plugin<Project> {
     }
 
     public void apply(Project project) {
-        project.getPlugins().apply(LifecycleBasePlugin.class);
+        project.getPluginManager().apply(LifecycleBasePlugin.class);
 
         BasePluginConvention convention = new BasePluginConvention(project);
         project.getConvention().getPlugins().put("base", convention);
@@ -72,7 +72,7 @@ public class BasePlugin implements Plugin<Project> {
         configureUploadArchivesTask();
         configureArchiveDefaults(project, convention);
         configureConfigurations(project);
-        configureAssemble(project);
+        configureAssemble((ProjectInternal) project);
     }
 
     private void configureArchiveDefaults(final Project project, final BasePluginConvention pluginConvention) {
@@ -123,10 +123,14 @@ public class BasePlugin implements Plugin<Project> {
         configurationActionContainer.add(new Action<Project>() {
             public void execute(Project project) {
                 Upload uploadArchives = project.getTasks().withType(Upload.class).findByName(UPLOAD_ARCHIVES_TASK_NAME);
-                if (uploadArchives == null) { return; }
+                if (uploadArchives == null) {
+                    return;
+                }
 
                 boolean hasIvyRepo = !uploadArchives.getRepositories().withType(IvyArtifactRepository.class).isEmpty();
-                if (!hasIvyRepo) { return; } // Maven repos are handled by MavenPlugin
+                if (!hasIvyRepo) {
+                    return;
+                } // Maven repos are handled by MavenPlugin
 
                 ConfigurationInternal configuration = (ConfigurationInternal) uploadArchives.getConfiguration();
                 ModuleInternal module = configuration.getModule();
@@ -141,10 +145,10 @@ public class BasePlugin implements Plugin<Project> {
         ConfigurationContainer configurations = project.getConfigurations();
         project.setProperty("status", "integration");
 
-        Configuration archivesConfiguration = configurations.create(Dependency.ARCHIVES_CONFIGURATION).
+        Configuration archivesConfiguration = configurations.maybeCreate(Dependency.ARCHIVES_CONFIGURATION).
                 setDescription("Configuration for archive artifacts.");
 
-        configurations.create(Dependency.DEFAULT_CONFIGURATION).
+        configurations.maybeCreate(Dependency.DEFAULT_CONFIGURATION).
                 setDescription("Configuration for default artifacts.");
 
         final DefaultArtifactPublicationSet defaultArtifacts = project.getExtensions().create(
@@ -162,8 +166,7 @@ public class BasePlugin implements Plugin<Project> {
         });
     }
 
-    private void configureAssemble(Project project) {
-        Task assembleTask = project.getTasks().getByName(ASSEMBLE_TASK_NAME);
-        assembleTask.dependsOn(project.getConfigurations().getByName(Dependency.ARCHIVES_CONFIGURATION).getAllArtifacts().getBuildDependencies());
+    private void configureAssemble(final ProjectInternal project) {
+        project.getTasks().getByName(ASSEMBLE_TASK_NAME).dependsOn(project.getConfigurations().getByName(Dependency.ARCHIVES_CONFIGURATION).getAllArtifacts().getBuildDependencies());
     }
 }

@@ -23,22 +23,23 @@ import org.gradle.api.InvalidUserDataException
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.result.DependencyResult
 import org.gradle.api.artifacts.result.ResolutionResult
-import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionMatcher
+import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionComparator
+import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionSelectorScheme
 import org.gradle.api.internal.tasks.options.Option
 import org.gradle.api.specs.Spec
 import org.gradle.api.tasks.TaskAction
-import org.gradle.api.tasks.diagnostics.internal.dsl.DependencyResultSpecNotationParser
+import org.gradle.api.tasks.diagnostics.internal.dsl.DependencyResultSpecNotationConverter
 import org.gradle.api.tasks.diagnostics.internal.graph.DependencyGraphRenderer
 import org.gradle.api.tasks.diagnostics.internal.graph.NodeRenderer
 import org.gradle.api.tasks.diagnostics.internal.graph.nodes.RenderableDependency
 import org.gradle.api.tasks.diagnostics.internal.insight.DependencyInsightReporter
 import org.gradle.internal.graph.GraphRenderer
-import org.gradle.logging.StyledTextOutput
-import org.gradle.logging.StyledTextOutputFactory
+import org.gradle.internal.logging.StyledTextOutput
+import org.gradle.internal.logging.StyledTextOutputFactory
 
 import javax.inject.Inject
 
-import static org.gradle.logging.StyledTextOutput.Style.*
+import static StyledTextOutput.Style.*
 
 /**
  * Generates a report that attempts to answer questions like:
@@ -86,8 +87,13 @@ public class DependencyInsightReportTask extends DefaultTask {
     }
 
     @Inject
-    protected VersionMatcher getVersionMatcher() {
+    protected VersionSelectorScheme getVersionSelectorScheme() {
         throw new UnsupportedOperationException()
+    }
+
+    @Inject
+    protected VersionComparator getVersionComparator() {
+        throw new UnsupportedOperationException();
     }
 
     /**
@@ -115,7 +121,7 @@ public class DependencyInsightReportTask extends DefaultTask {
      */
     @Option(option = "dependency", description = "Shows the details of given dependency.")
     public void setDependencySpec(Object dependencyInsightNotation) {
-        def parser = DependencyResultSpecNotationParser.create()
+        def parser = DependencyResultSpecNotationConverter.parser()
         this.dependencySpec = parser.parseNotation(dependencyInsightNotation)
     }
 
@@ -143,6 +149,7 @@ public class DependencyInsightReportTask extends DefaultTask {
 
     @TaskAction
     public void report() {
+        def configuration = getConfiguration()
         if (configuration == null) {
             throw new InvalidUserDataException("Dependency insight report cannot be generated because the input configuration was not specified. "
                     + "\nIt can be specified from the command line, e.g: '$path --configuration someConf --dependency someDep'")
@@ -165,16 +172,16 @@ public class DependencyInsightReportTask extends DefaultTask {
         }
 
         if (selectedDependencies.empty) {
-            output.println("No dependencies matching given input were found in $configuration")
+            output.println("No dependencies matching given input were found in ${configuration}")
             return
         }
 
-        def sortedDeps = new DependencyInsightReporter().prepare(selectedDependencies, versionMatcher)
+        def sortedDeps = new DependencyInsightReporter().prepare(selectedDependencies, versionSelectorScheme, versionComparator)
 
         def nodeRenderer = new NodeRenderer() {
             void renderNode(StyledTextOutput target, RenderableDependency node, boolean alreadyRendered) {
                 boolean leaf = node.children.empty
-                target.text(leaf ? DependencyInsightReportTask.this.configuration.name : node.name);
+                target.text(leaf ? configuration.name : node.name);
                 if (alreadyRendered && !leaf) {
                     target.withStyle(Info).text(" (*)")
                 }

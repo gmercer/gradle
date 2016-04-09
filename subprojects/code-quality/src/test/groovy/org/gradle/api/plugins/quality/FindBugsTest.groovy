@@ -16,19 +16,14 @@
 
 package org.gradle.api.plugins.quality
 
-import spock.lang.Specification
-
+import org.gradle.api.GradleException
 import org.gradle.api.plugins.quality.internal.findbugs.FindBugsResult
 import org.gradle.testfixtures.ProjectBuilder
-import org.gradle.api.GradleException
+import spock.lang.Specification
 
 class FindBugsTest extends Specification {
-    private FindBugs findbugs
-
-    def setup() {
-        def project = ProjectBuilder.builder().build()
-        findbugs = project.tasks.create("findbugs", FindBugs)
-    }
+    def project = ProjectBuilder.builder().build()
+    FindBugs findbugs = project.tasks.create("findbugs", FindBugs)
 
     def "fails when errorCount greater than zero"() {
         def result = Mock(FindBugsResult)
@@ -106,5 +101,46 @@ class FindBugsTest extends Specification {
 
         then:
         noExceptionThrown()
+    }
+
+    def "can use legacy includeFilter property"() {
+        findbugs.includeFilter = project.file("config/file.txt")
+
+        expect:
+        findbugs.includeFilter == project.file("config/file.txt")
+        findbugs.includeFilterConfig.inputFiles.singleFile == project.file("config/file.txt")
+    }
+
+    def "can use legacy excludeFilter property"() {
+        findbugs.excludeFilter = project.file("config/file.txt")
+
+        expect:
+        findbugs.excludeFilter == project.file("config/file.txt")
+        findbugs.excludeFilterConfig.inputFiles.singleFile == project.file("config/file.txt")
+    }
+
+    def "can use legacy excludeBugsFilter property"() {
+        findbugs.excludeBugsFilter = project.file("config/file.txt")
+
+        expect:
+        findbugs.excludeBugsFilter == project.file("config/file.txt")
+        findbugs.excludeBugsFilterConfig.inputFiles.singleFile == project.file("config/file.txt")
+    }
+
+    def "can add extra args"() {
+        given:
+        findbugs.extraArgs = [ 'abc' ]
+        expect:
+        findbugs.extraArgs == [ 'abc' ]
+
+        when:
+        findbugs.extraArgs 'def'
+        then:
+        findbugs.extraArgs == [ 'abc', 'def' ]
+
+        when:
+        findbugs.extraArgs([ 'ghi', 'jkl' ])
+        then:
+        findbugs.extraArgs == [ 'abc', 'def', 'ghi', 'jkl' ]
     }
 }

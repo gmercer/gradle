@@ -17,7 +17,7 @@
 package org.gradle.tooling.internal.adapter
 
 import org.gradle.api.Action
-import org.gradle.messaging.remote.internal.Message
+import org.gradle.internal.serialize.Message
 import org.gradle.tooling.model.DomainObjectSet
 import org.gradle.tooling.model.UnsupportedMethodException
 import org.gradle.util.Matchers
@@ -124,6 +124,37 @@ class ProtocolToModelAdapterTest extends Specification {
         model.childMap[model.project] == model.project
     }
 
+    def adaptsEnum() {
+        TestProtocolModel protocolModel = Mock()
+        _ * protocolModel.getTestEnum() >> TestEnum.FIRST
+
+        expect:
+        TestModel model = adapter.adapt(TestModel.class, protocolModel)
+        model.testEnum == TestEnum.FIRST
+    }
+
+    def adaptsStringToEnum() {
+        TestProtocolModel protocolModel = Mock()
+        _ * protocolModel.getTestEnum() >> "SECOND"
+
+        expect:
+        TestModel model = adapter.adapt(TestModel.class, protocolModel)
+        model.testEnum == TestEnum.SECOND
+    }
+
+    def cantAdaptInvalidEnumLiteral() {
+        setup:
+        TestProtocolModel protocolModel = Mock()
+        _ * protocolModel.getTestEnum() >> "NONEXISTING"
+
+        when:
+        TestModel model = adapter.adapt(TestModel.class, protocolModel)
+        model.getTestEnum()
+
+        then:
+        thrown(IllegalArgumentException)
+    }
+
     def cachesPropertyValues() {
         TestProtocolModel protocolModel = Mock()
         TestProtocolProject protocolProject = Mock()
@@ -217,6 +248,16 @@ class ProtocolToModelAdapterTest extends Specification {
 
         then:
         model.getConfig("default") == "default"
+    }
+
+    def "can use safe getter for boolean properties"() {
+        TestProtocolModel protocolModel = Mock()
+
+        when:
+        def model = adapter.adapt(TestModel.class, protocolModel)
+
+        then:
+        model.isThing(true)
     }
 
     def "mapper can register method invoker to override getter method"() {
@@ -440,11 +481,15 @@ interface TestModel {
 
     String getConfig(String defaultValue)
 
+    Boolean isThing(Boolean defaultValue)
+
     DomainObjectSet<? extends TestProject> getChildren()
 
     List<TestProject> getChildList()
 
     Map<TestProject, TestProject> getChildMap()
+
+    TestEnum getTestEnum()
 }
 
 interface TestProject {
@@ -466,6 +511,8 @@ interface TestProtocolModel {
     Map<String, ? extends TestProtocolProject> getChildMap()
 
     String getConfig();
+
+    Object getTestEnum()
 }
 
 interface PartialTestProtocolModel {
@@ -474,6 +521,10 @@ interface PartialTestProtocolModel {
 
 interface TestProtocolProject {
     String getName()
+}
+
+enum TestEnum {
+    FIRST, SECOND
 }
 
 class TestProtocolProjectImpl implements Serializable {

@@ -30,7 +30,9 @@ import org.gradle.tooling.model.internal.Exceptions
 class DefaultModelBuilderTest extends ConcurrentSpec {
     final AsyncConsumerActionExecutor asyncConnection = Mock()
     final ConsumerConnection connection = Mock()
-    final ConnectionParameters parameters = Mock()
+    final ProjectConnectionParameters parameters = Stub() {
+        getProjectDir() >> new File('foo')
+    }
     final DefaultModelBuilder<GradleProject> builder = new DefaultModelBuilder<GradleProject>(GradleProject, asyncConnection, parameters)
 
     def "requests model from consumer connection"() {
@@ -56,6 +58,7 @@ class DefaultModelBuilderTest extends ConcurrentSpec {
             assert params.jvmArguments == null
             assert params.arguments == null
             assert params.progressListener != null
+            assert params.cancellationToken != null
             assert params.tasks == null
             return result
         }

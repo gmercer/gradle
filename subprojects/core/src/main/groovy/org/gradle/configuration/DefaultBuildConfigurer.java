@@ -16,27 +16,30 @@
 package org.gradle.configuration;
 
 import org.gradle.StartParameter;
-import org.gradle.api.Project;
 import org.gradle.api.internal.GradleInternal;
-import org.gradle.api.internal.project.ProjectInternal;
+import org.gradle.execution.ProjectConfigurer;
 import org.gradle.util.SingleMessageLogger;
 
 public class DefaultBuildConfigurer implements BuildConfigurer {
+    private final ProjectConfigurer projectConfigurer;
+
+    public DefaultBuildConfigurer(ProjectConfigurer projectConfigurer) {
+        this.projectConfigurer = projectConfigurer;
+    }
+
     public void configure(GradleInternal gradle) {
         maybeInformAboutIncubatingMode(gradle.getStartParameter());
         if (gradle.getStartParameter().isConfigureOnDemand()) {
-            gradle.getRootProject().evaluate();
+            projectConfigurer.configure(gradle.getRootProject());
         } else {
-            for (Project project : gradle.getRootProject().getAllprojects()) {
-                ((ProjectInternal) project).evaluate();
-            }
+            projectConfigurer.configureHierarchy(gradle.getRootProject());
         }
     }
 
     private void maybeInformAboutIncubatingMode(StartParameter startParameter) {
-        if (startParameter.getParallelThreadCount() != 0 && startParameter.isConfigureOnDemand()) {
+        if (startParameter.isParallelProjectExecutionEnabled() && startParameter.isConfigureOnDemand()) {
             SingleMessageLogger.incubatingFeatureUsed("Parallel execution with configuration on demand");
-        } else if (startParameter.getParallelThreadCount() != 0) {
+        } else if (startParameter.isParallelProjectExecutionEnabled()) {
             SingleMessageLogger.incubatingFeatureUsed("Parallel execution");
         } else if (startParameter.isConfigureOnDemand()) {
             SingleMessageLogger.incubatingFeatureUsed("Configuration on demand");

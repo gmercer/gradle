@@ -16,10 +16,17 @@
 
 package org.gradle.tooling.internal.provider;
 
-import org.gradle.initialization.GradleLauncherFactory;
+import org.gradle.internal.classloader.ClassLoaderFactory;
+import org.gradle.internal.event.ListenerManager;
 import org.gradle.internal.service.ServiceRegistration;
+import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.internal.service.scopes.GlobalScopeServices;
-import org.gradle.logging.LoggingServiceRegistry;
+import org.gradle.launcher.daemon.client.DaemonClientFactory;
+import org.gradle.launcher.daemon.client.DaemonClientGlobalServices;
+import org.gradle.launcher.daemon.client.JvmVersionDetector;
+import org.gradle.launcher.exec.BuildExecuter;
+import org.gradle.internal.logging.LoggingServiceRegistry;
+import org.gradle.internal.logging.internal.OutputEventRenderer;
 import org.gradle.tooling.internal.adapter.ProtocolToModelAdapter;
 
 /**
@@ -34,18 +41,35 @@ public class ConnectionScopeServices {
 
     void configure(ServiceRegistration serviceRegistration) {
         serviceRegistration.add(LoggingServiceRegistry.class, loggingServices);
-        serviceRegistration.addProvider(new GlobalScopeServices(false));
+        serviceRegistration.addProvider(new GlobalScopeServices(true));
+        serviceRegistration.addProvider(new DaemonClientGlobalServices());
     }
 
-    ProviderConnection createProviderConnection(GradleLauncherFactory gradleLauncherFactory) {
+    ShutdownCoordinator createShutdownCoordinator(ListenerManager listenerManager, DaemonClientFactory daemonClientFactory, OutputEventRenderer outputEventRenderer) {
+        ShutdownCoordinator shutdownCoordinator = new ShutdownCoordinator(daemonClientFactory, outputEventRenderer);
+        listenerManager.addListener(shutdownCoordinator);
+        return shutdownCoordinator;
+    }
+
+    ProviderConnection createProviderConnection(BuildExecuter buildActionExecuter, DaemonClientFactory daemonClientFactory,
+                                                ClassLoaderFactory classLoaderFactory, ServiceRegistry serviceRegistry,
+                                                JvmVersionDetector jvmVersionDetector,
+                                                // This is here to trigger creation of the ShutdownCoordinator. Could do this in a nicer way
+                                                ShutdownCoordinator shutdownCoordinator) {
         return new ProviderConnection(
+                serviceRegistry,
                 loggingServices,
-                gradleLauncherFactory,
+                daemonClientFactory,
+                buildActionExecuter,
                 new PayloadSerializer(
                         new ClientSidePayloadClassLoaderRegistry(
                                 new DefaultPayloadClassLoaderRegistry(
-                                        new ModelClassLoaderFactory()),
-                                new ClasspathInferer()))
+                                        new ClassLoaderCache(),
+                                        new ClientSidePayloadClassLoaderFactory(
+                                                new ModelClassLoaderFactory(
+                                                        classLoaderFactory))),
+                                new ClasspathInferer())),
+                jvmVersionDetector
         );
     }
 

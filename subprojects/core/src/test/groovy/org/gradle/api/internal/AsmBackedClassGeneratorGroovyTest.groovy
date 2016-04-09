@@ -16,12 +16,15 @@
 
 package org.gradle.api.internal
 
+import com.google.common.base.Function
 import org.gradle.api.Action
 import org.gradle.api.NonExtensible
 import org.gradle.api.plugins.ExtensionAware
+import org.gradle.internal.BiAction
 import org.gradle.internal.reflect.DirectInstantiator
 import org.gradle.internal.service.ServiceRegistry
 import org.gradle.internal.typeconversion.TypeConversionException
+import org.gradle.internal.util.BiFunction
 import org.gradle.util.ConfigureUtil
 import spock.lang.Issue
 import spock.lang.Specification
@@ -31,10 +34,10 @@ import javax.inject.Inject
 class AsmBackedClassGeneratorGroovyTest extends Specification {
 
     def generator = new AsmBackedClassGenerator()
-    def instantiator = new ClassGeneratorBackedInstantiator(generator, new DirectInstantiator())
+    def instantiator = new ClassGeneratorBackedInstantiator(generator, DirectInstantiator.INSTANCE)
 
     private <T> T create(Class<T> clazz, Object... args) {
-        instantiator.newInstance(clazz, *args)
+        instantiator.newInstance(clazz, args) as T
     }
 
     @Issue("GRADLE-2417")
@@ -44,7 +47,7 @@ class AsmBackedClassGeneratorGroovyTest extends Specification {
 
         when:
         conf(thing) {
-            m1(1,2,3)
+            m1(1, 2, 3)
             p1 = 1
             p1 = p1 + 1
         }
@@ -142,6 +145,20 @@ class AsmBackedClassGeneratorGroovyTest extends Specification {
         tester.lastArgs.size() == 2
         tester.lastArgs.first() == "1"
         tester.lastArgs.last().is(closure)
+
+        expect: // can return values
+        tester.oneActionReturnsString({}) == "string"
+        tester.lastArgs.last() instanceof ClosureBackedAction
+        tester.twoArgsReturnsString("foo", {}) == "string"
+        tester.lastArgs.last() instanceof ClosureBackedAction
+        tester.oneActionReturnsInt({}) == 1
+        tester.lastArgs.last() instanceof ClosureBackedAction
+        tester.twoArgsReturnsInt("foo", {}) == 1
+        tester.lastArgs.last() instanceof ClosureBackedAction
+        tester.oneActionReturnsArray({}) == [] as Object[]
+        tester.lastArgs.last() instanceof ClosureBackedAction
+        tester.twoArgsReturnsArray("foo", {}) == [] as Object[]
+        tester.lastArgs.last() instanceof ClosureBackedAction
     }
 
     def "can coerce enum values"() {
@@ -197,6 +214,14 @@ class AsmBackedClassGeneratorGroovyTest extends Specification {
         then:
         i.setDuringConstructor == i.class
         i.setAtFieldInit == i.class
+    }
+
+    def "can use inherited properties during construction"() {
+        when:
+        def i = create(UsesInheritedPropertiesDuringConstruction)
+
+        then:
+        i.someValue == 'value'
     }
 
     def "can call private methods internally"() {
@@ -256,16 +281,16 @@ class AsmBackedClassGeneratorGroovyTest extends Specification {
         ConfigureUtil.configure(c, o)
     }
 
-    @Issue("http://issues.gradle.org/browse/GRADLE-2863")
+    @Issue("https://issues.gradle.org/browse/GRADLE-2863")
     def "checked exceptions from private methods are thrown"() {
-            when:
+        when:
         create(CallsPrivateMethods).callsPrivateThatThrowsCheckedException("1")
 
         then:
         thrown IOException
     }
 
-    @Issue("http://issues.gradle.org/browse/GRADLE-2863")
+    @Issue("https://issues.gradle.org/browse/GRADLE-2863")
     def "private methods are called with Groovy semantics"() {
         when:
         def foo = "bar"
@@ -288,6 +313,24 @@ class AsmBackedClassGeneratorGroovyTest extends Specification {
         obj.thing == service
         obj.getThing() == service
         obj.getProperty("thing") == service
+    }
+
+    def "can optionally set injected service using a service setter method"() {
+        given:
+        def services = Mock(ServiceRegistry)
+        def service = Mock(Runnable)
+
+        when:
+        def obj = create(BeanWithMutableServices, services)
+        obj.thing = service
+
+        then:
+        obj.thing == service
+        obj.getThing() == service
+        obj.getProperty("thing") == service
+
+        and:
+        0 * services._
     }
 
     def "service lookup is lazy and the result is cached"() {
@@ -313,6 +356,19 @@ class AsmBackedClassGeneratorGroovyTest extends Specification {
 
         then:
         0 * services._
+    }
+
+    def "property missing implementation is invoked exactly once, with actual value"() {
+        given:
+        def thing = create(DynamicThing)
+        def values = []
+        thing.onPropertyMissingSet = { n, v -> values << v }
+
+        when:
+        thing.foo = "bar"
+
+        then:
+        values == ["bar"]
     }
 }
 
@@ -347,20 +403,20 @@ class DynamicThing {
     def methods = [:]
     def props = [:]
 
-    Closure onMethodMissing = { name, args -> methods[name] = args.toList() }
-    Closure onPropertyMissingGet = { name -> props[name] }
-    Closure onPropertyMissingSet = { name, value -> props[name] = value }
+    BiFunction<Object, String, Object[]> onMethodMissing = { name, args -> methods[name] = args.toList(); null }
+    Function<String, Object> onPropertyMissingGet = { name -> props[name] }
+    BiAction<String, Object> onPropertyMissingSet = { name, value -> props[name] = value }
 
     def methodMissing(String name, args) {
-        onMethodMissing(name, args)
+        onMethodMissing.apply(name, args as Object[])
     }
 
     def propertyMissing(String name) {
-        onPropertyMissingGet(name)
+        onPropertyMissingGet.apply(name)
     }
 
     def propertyMissing(String name, value) {
-        onPropertyMissingSet(name, value)
+        onPropertyMissingSet.execute(name, value)
     }
 }
 
@@ -409,15 +465,72 @@ class ActionsTester {
         lastMethod = "hasClosure"
         lastArgs = [s, closure]
     }
+
+    String oneActionReturnsString(Action action) {
+        lastMethod = "oneAction"
+        lastArgs = [action]
+        action.execute(subject)
+        "string"
+    }
+
+    String twoArgsReturnsString(String first, Action action) {
+        lastMethod = "twoArgs"
+        lastArgs = [first, action]
+        action.execute(subject)
+        "string"
+    }
+
+    int oneActionReturnsInt(Action action) {
+        lastMethod = "oneAction"
+        lastArgs = [action]
+        action.execute(subject)
+        1
+    }
+
+    int twoArgsReturnsInt(String first, Action action) {
+        lastMethod = "twoArgs"
+        lastArgs = [first, action]
+        action.execute(subject)
+        1
+    }
+
+    Object[] oneActionReturnsArray(Action action) {
+        lastMethod = "oneAction"
+        lastArgs = [action]
+        action.execute(subject)
+        [] as Object[]
+    }
+
+    Object[] twoArgsReturnsArray(String first, Action action) {
+        lastMethod = "twoArgs"
+        lastArgs = [first, action]
+        action.execute(subject)
+        [] as Object[]
+    }
+
 }
 
 class CallsMethodDuringConstruction {
 
     Class setAtFieldInit = getClass()
+    Map<String, String> someMap = [:]
     Class setDuringConstructor
 
     CallsMethodDuringConstruction() {
-        setDuringConstructor = getClass()
+        setDuringConstructor = setAtFieldInit
+        someMap['a'] = 'b'
+        assert setDuringConstructor
+    }
+}
+
+class UsesInheritedPropertiesDuringConstruction extends TestJavaObject {
+    UsesInheritedPropertiesDuringConstruction() {
+        assert metaClass != null
+        assert getMetaClass() != null
+        assert metaClass.getProperty(this, "someValue") == "value"
+        assert asDynamicObject.getProperty("someValue") == "value"
+        assert getProperty("someValue") == "value"
+        assert someValue == "value"
     }
 }
 
@@ -446,7 +559,7 @@ class CallsPrivateMethods {
     }
 
     // It's important here that we take an untyped arg, and call a method that types a typed arg
-    // See http://issues.gradle.org/browse/GRADLE-2863
+    // See https://issues.gradle.org/browse/GRADLE-2863
     def callsPrivateThatThrowsCheckedException(s) {
         try {
             throwsCheckedException(s)
@@ -478,4 +591,12 @@ class BeanWithServices {
 
     @Inject
     Runnable getThing() { throw new UnsupportedOperationException() }
+}
+
+class BeanWithMutableServices extends BeanWithServices {
+    BeanWithMutableServices(ServiceRegistry services) {
+        super(services)
+    }
+
+    void setThing(Runnable runnnable) { throw new UnsupportedOperationException() }
 }

@@ -15,19 +15,15 @@
  */
 package org.gradle.integtests.tooling.m3
 
-import org.gradle.integtests.tooling.fixture.TargetGradleVersion
 import org.gradle.integtests.tooling.fixture.ToolingApiSpecification
-import org.gradle.integtests.tooling.fixture.ToolingApiVersion
 import org.gradle.tooling.model.ExternalDependency
 import org.gradle.tooling.model.eclipse.EclipseProject
 import org.gradle.tooling.model.eclipse.HierarchicalEclipseProject
 
-@ToolingApiVersion(">=1.2")
-@TargetGradleVersion(">=1.0-milestone-8")
 class ToolingApiEclipseModelCrossVersionSpec extends ToolingApiSpecification {
 
     def "can build the eclipse model for a java project"() {
-        
+
         projectDir.file('build.gradle').text = '''
 apply plugin: 'java'
 description = 'this is a project'
@@ -35,7 +31,7 @@ description = 'this is a project'
         projectDir.file('settings.gradle').text = 'rootProject.name = \"test project\"'
 
         when:
-        HierarchicalEclipseProject minimalProject = withConnection { connection -> connection.getModel(HierarchicalEclipseProject.class) }
+        HierarchicalEclipseProject minimalProject = loadToolingModel(HierarchicalEclipseProject)
 
         then:
         minimalProject.name == 'test project'
@@ -45,7 +41,7 @@ description = 'this is a project'
         minimalProject.children.empty
 
         when:
-        EclipseProject fullProject = withConnection { connection -> connection.getModel(EclipseProject.class) }
+        EclipseProject fullProject = loadToolingModel(EclipseProject)
 
         then:
         fullProject.name == 'test project'
@@ -57,7 +53,7 @@ description = 'this is a project'
 
     def "can build the eclipse model for an empty project"() {
         when:
-        HierarchicalEclipseProject minimalProject = withConnection { connection -> connection.getModel(HierarchicalEclipseProject.class) }
+        HierarchicalEclipseProject minimalProject = loadToolingModel(HierarchicalEclipseProject)
 
         then:
         minimalProject != null
@@ -69,7 +65,7 @@ description = 'this is a project'
         minimalProject.projectDependencies.empty
 
         when:
-        EclipseProject fullProject = withConnection { connection -> connection.getModel(EclipseProject.class) }
+        EclipseProject fullProject = loadToolingModel(EclipseProject)
 
         then:
         fullProject != null
@@ -88,14 +84,14 @@ description = 'this is a project'
 apply plugin: 'java'
 gradle.taskGraph.beforeTask { throw new RuntimeException() }
 '''
-        HierarchicalEclipseProject project = withConnection { connection -> connection.getModel(HierarchicalEclipseProject.class) }
+        HierarchicalEclipseProject project = loadToolingModel(HierarchicalEclipseProject)
 
         then:
         project != null
     }
 
     def "can build the eclipse source directories for a java project"() {
-        
+
         projectDir.file('build.gradle').text = "apply plugin: 'java'"
 
         projectDir.create {
@@ -112,7 +108,7 @@ gradle.taskGraph.beforeTask { throw new RuntimeException() }
         }
 
         when:
-        HierarchicalEclipseProject minimalProject = withConnection { connection -> connection.getModel(HierarchicalEclipseProject.class) }
+        HierarchicalEclipseProject minimalProject = loadToolingModel(HierarchicalEclipseProject)
 
         then:
         minimalProject != null
@@ -128,7 +124,7 @@ gradle.taskGraph.beforeTask { throw new RuntimeException() }
         minimalProject.sourceDirectories[3].directory == projectDir.file('src/test/resources')
 
         when:
-        EclipseProject fullProject = withConnection { connection -> connection.getModel(EclipseProject.class) }
+        EclipseProject fullProject = loadToolingModel(EclipseProject)
 
         then:
         fullProject != null
@@ -145,7 +141,7 @@ gradle.taskGraph.beforeTask { throw new RuntimeException() }
     }
 
     def "can build the eclipse external dependencies for a java project"() {
-        
+
         projectDir.file('settings.gradle').text = '''
 include "a"
 rootProject.name = 'root'
@@ -161,7 +157,7 @@ dependencies {
 '''
 
         when:
-        EclipseProject eclipseProject = withConnection { connection -> connection.getModel(EclipseProject.class) }
+        EclipseProject eclipseProject = loadToolingModel(EclipseProject)
 
         then:
         eclipseProject != null
@@ -173,10 +169,8 @@ dependencies {
         eclipseProject.classpath.collect { it.javadoc?.name } as Set == [null, null] as Set
     }
 
-    //TODO SF: write a test that checks if minimal project has necessary project dependencies
-
     def "can build the minimal Eclipse model for a java project with the idea plugin applied"() {
-        
+
         projectDir.file('build.gradle').text = '''
 apply plugin: 'java'
 apply plugin: 'idea'
@@ -187,14 +181,14 @@ dependencies {
 '''
 
         when:
-        HierarchicalEclipseProject minimalProject = withConnection { connection -> connection.getModel(HierarchicalEclipseProject.class) }
+        HierarchicalEclipseProject minimalProject = loadToolingModel(HierarchicalEclipseProject)
 
         then:
         minimalProject != null
     }
 
     def "can build the eclipse project dependencies for a java project"() {
-        
+
         projectDir.file('settings.gradle').text = '''
 include "a", "a:b"
 rootProject.name = 'root'
@@ -212,7 +206,7 @@ project(':a') {
 '''
 
         when:
-        HierarchicalEclipseProject minimalModel = withConnection { connection -> connection.getModel(HierarchicalEclipseProject.class) }
+        HierarchicalEclipseProject minimalModel = loadToolingModel(HierarchicalEclipseProject)
 
         then:
         HierarchicalEclipseProject minimalProject = minimalModel.children[0]
@@ -223,7 +217,7 @@ project(':a') {
         minimalProject.projectDependencies.any { it.path == 'b' && it.targetProject == minimalProject.children[0] }
 
         when:
-        EclipseProject fullModel = withConnection { connection -> connection.getModel(EclipseProject.class) }
+        EclipseProject fullModel = loadToolingModel(EclipseProject)
 
         then:
         EclipseProject fullProject = fullModel.children[0]
@@ -235,7 +229,7 @@ project(':a') {
     }
 
     def "can build project dependencies with targetProject references for complex scenarios"() {
-        
+
         projectDir.file('settings.gradle').text = '''
 include "c", "a", "a:b"
 rootProject.name = 'root'
@@ -259,7 +253,7 @@ project(':c') {
 '''
 
         when:
-        EclipseProject rootProject = withConnection { connection -> connection.getModel(EclipseProject.class) }
+        EclipseProject rootProject = loadToolingModel(EclipseProject)
 
         then:
         def projectC = rootProject.children.find { it.name == 'c'}
@@ -274,7 +268,7 @@ project(':c') {
     }
 
     def "can build the eclipse project hierarchy for a multi-project build"() {
-        
+
         projectDir.file('settings.gradle').text = '''
             include "child1", "child2", "child1:grandChild1"
             rootProject.name = 'root'
@@ -282,7 +276,7 @@ project(':c') {
         projectDir.file('child1').mkdirs()
 
         when:
-        EclipseProject rootProject = withConnection { connection -> connection.getModel(EclipseProject.class) }
+        EclipseProject rootProject = loadToolingModel(EclipseProject)
 
         then:
         rootProject != null
@@ -290,8 +284,9 @@ project(':c') {
         rootProject.parent == null
 
         rootProject.children.size() == 2
+        def children = rootProject.children.sort { it.name }
 
-        EclipseProject child1 = rootProject.children[0]
+        EclipseProject child1 = children[0]
         child1.name == 'child1'
         child1.parent == rootProject
         child1.children.size() == 1
@@ -301,7 +296,7 @@ project(':c') {
         child1Child1.parent == child1
         child1Child1.children.size() == 0
 
-        EclipseProject child2 = rootProject.children[1]
+        EclipseProject child2 = children[1]
         child2.name == 'child2'
         child2.parent == rootProject
         child2.children.size() == 0
@@ -311,12 +306,35 @@ project(':c') {
             connector.searchUpwards(true)
             connector.forProjectDirectory(projectDir.file('child1'))
         }
-        EclipseProject child = toolingApi.withConnection { connection -> connection.getModel(EclipseProject.class) }
+        EclipseProject child = loadToolingModel(EclipseProject)
 
         then:
         child.name == 'child1'
         child.parent != null
         child.parent.name == 'root'
         child.children.size() == 1
+    }
+
+    def "respects customized eclipse project name"() {
+        settingsFile.text = "include ':foo', ':bar'"
+        buildFile.text = """
+allprojects {
+    apply plugin:'java'
+    apply plugin:'eclipse'
+}
+
+configure(project(':bar')) {
+    eclipse {
+        project {
+            name = "customized-bar"
+        }
+    }
+}
+"""
+        when:
+        HierarchicalEclipseProject rootProject = loadToolingModel(HierarchicalEclipseProject)
+        then:
+        rootProject.children.any { it.name == 'foo'}
+        rootProject.children.any { it.name == 'customized-bar'}
     }
 }

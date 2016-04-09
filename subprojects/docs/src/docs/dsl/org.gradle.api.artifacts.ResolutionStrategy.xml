@@ -10,6 +10,12 @@
             <tr>
                 <td>forcedModules</td>
             </tr>
+            <tr>
+                <td>componentSelection</td>
+            </tr>
+            <tr>
+                <td>dependencySubstitution</td>
+            </tr>
         </table>
     </section>
     <section>
@@ -34,6 +40,12 @@
             </tr>
             <tr>
                 <td>eachDependency</td>
+            </tr>
+            <tr>
+                <td>dependencySubstitution</td>
+            </tr>
+            <tr>
+                <td>componentSelection</td>
             </tr>
         </table>
     </section>

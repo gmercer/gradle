@@ -16,14 +16,15 @@
 
 package org.gradle.api.tasks;
 
+import com.google.common.collect.Lists;
 import groovy.lang.Closure;
 import org.gradle.api.Action;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.internal.AbstractTask;
-import org.gradle.internal.Actions;
 import org.gradle.api.internal.DependencyInjectingInstantiator;
+import org.gradle.api.internal.TaskInternal;
 import org.gradle.api.internal.project.AbstractProject;
 import org.gradle.api.internal.project.DefaultProject;
 import org.gradle.api.internal.project.ProjectInternal;
@@ -31,19 +32,22 @@ import org.gradle.api.internal.project.taskfactory.ITaskFactory;
 import org.gradle.api.internal.tasks.TaskExecuter;
 import org.gradle.api.internal.tasks.TaskExecutionContext;
 import org.gradle.api.internal.tasks.TaskStateInternal;
+import org.gradle.api.internal.tasks.execution.DefaultTaskExecutionContext;
 import org.gradle.api.specs.Spec;
+import org.gradle.internal.Actions;
 import org.gradle.internal.reflect.Instantiator;
 import org.gradle.internal.service.DefaultServiceRegistry;
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider;
 import org.gradle.util.GUtil;
-import org.gradle.util.TestUtil;
 import org.gradle.util.JUnit4GroovyMockery;
+import org.gradle.util.TestUtil;
 import org.jmock.Expectations;
 import org.jmock.lib.legacy.ClassImposteriser;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.hamcrest.Matchers.notNullValue;
@@ -79,6 +83,11 @@ public abstract class AbstractTaskTest {
         Task task = project.getServices().get(ITaskFactory.class).createTask(GUtil.map(Task.TASK_TYPE, type, Task.TASK_NAME, name));
         assertTrue(type.isAssignableFrom(task.getClass()));
         return type.cast(task);
+    }
+
+    public void execute(TaskInternal task) {
+        project.getServices().get(TaskExecuter.class).execute(task, task.getState(), new DefaultTaskExecutionContext());
+        task.getState().rethrowFailure();
     }
 
     @Before
@@ -128,6 +137,20 @@ public abstract class AbstractTaskTest {
         getTask().doLast(action2);
         assertSame(getTask(), getTask().deleteAllActions());
         assertTrue(getTask().getActions().isEmpty());
+    }
+
+    @Test
+    public void testSetActions() {
+        getTask().deleteAllActions();
+        getTask().getActions().add(Actions.doNothing());
+        getTask().getActions().add(Actions.doNothing());
+        assertEquals(2, getTask().getActions().size());
+
+        List<Action<? super Task>> actions = Lists.newArrayList();
+        actions.add(Actions.doNothing());
+
+        getTask().setActions(actions);
+        assertEquals(getTask().getActions().size(), 1);
     }
 
     @Test(expected = InvalidUserDataException.class)

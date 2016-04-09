@@ -19,14 +19,18 @@ import org.gradle.api.internal.ClassPathRegistry;
 import org.gradle.api.internal.DefaultClassPathProvider;
 import org.gradle.api.internal.DefaultClassPathRegistry;
 import org.gradle.api.internal.classpath.DefaultModuleRegistry;
-import org.gradle.internal.classpath.ClassPath;
 import org.gradle.internal.classloader.ClassLoaderFactory;
 import org.gradle.internal.classloader.DefaultClassLoaderFactory;
 import org.gradle.internal.classloader.MutableURLClassLoader;
+import org.gradle.internal.classpath.ClassPath;
+import org.gradle.internal.installation.CurrentGradleInstallation;
 
 import java.lang.reflect.Method;
 
 public class ProcessBootstrap {
+    /**
+     * Sets up the ClassLoader structure for the given class, creates an instance and invokes {@link EntryPoint#run(String[])} on it.
+     */
     public void run(String mainClassName, String[] args) {
         try {
             runNoExit(mainClassName, args);
@@ -38,7 +42,7 @@ public class ProcessBootstrap {
     }
 
     private void runNoExit(String mainClassName, String[] args) throws Exception {
-        ClassPathRegistry classPathRegistry = new DefaultClassPathRegistry(new DefaultClassPathProvider(new DefaultModuleRegistry()));
+        ClassPathRegistry classPathRegistry = new DefaultClassPathRegistry(new DefaultClassPathProvider(new DefaultModuleRegistry(CurrentGradleInstallation.get())));
         ClassLoaderFactory classLoaderFactory = new DefaultClassLoaderFactory();
         ClassPath antClasspath = classPathRegistry.getClassPath("ANT");
         ClassPath runtimeClasspath = classPathRegistry.getClassPath("GRADLE_RUNTIME");
@@ -46,7 +50,8 @@ public class ProcessBootstrap {
         ClassLoader runtimeClassLoader = new MutableURLClassLoader(antClassLoader, runtimeClasspath);
         Thread.currentThread().setContextClassLoader(runtimeClassLoader);
         Class<?> mainClass = runtimeClassLoader.loadClass(mainClassName);
-        Method mainMethod = mainClass.getMethod("main", String[].class);
-        mainMethod.invoke(null, new Object[]{args});
+        Object entryPoint = mainClass.newInstance();
+        Method mainMethod = mainClass.getMethod("run", String[].class);
+        mainMethod.invoke(entryPoint, new Object[]{args});
     }
 }

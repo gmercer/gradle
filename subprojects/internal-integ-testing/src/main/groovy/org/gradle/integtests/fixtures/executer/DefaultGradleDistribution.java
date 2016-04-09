@@ -16,6 +16,7 @@
 
 package org.gradle.integtests.fixtures.executer;
 
+import org.gradle.api.JavaVersion;
 import org.gradle.internal.jvm.Jvm;
 import org.gradle.internal.os.OperatingSystem;
 import org.gradle.test.fixtures.file.TestDirectoryProvider;
@@ -65,8 +66,10 @@ public class DefaultGradleDistribution implements GradleDistribution {
         if (isVersion("0.9-rc-1")) {
             return jvm.getJavaVersion().isJava6Compatible();
         }
-
-        return jvm.getJavaVersion().isJava5Compatible();
+        if (isSameOrOlder("1.12")) {
+            return jvm.getJavaVersion().isJava5Compatible();
+        }
+        return jvm.getJavaVersion().isJava6Compatible();
     }
 
     public boolean worksWith(OperatingSystem os) {
@@ -79,31 +82,36 @@ public class DefaultGradleDistribution implements GradleDistribution {
         }
     }
 
-    public boolean isDaemonSupported() {
-        // Milestone 7 was broken on the IBM jvm
-        if (Jvm.current().isIbmJvm() && isVersion("1.0-milestone-7")) {
-            return false;
-        }
-
-        if (OperatingSystem.current().isWindows()) {
-            // On windows, daemon is ok for anything > 1.0-milestone-3
-            return isSameOrNewer("1.0-milestone-4");
-        } else {
-            // Daemon is ok for anything >= 0.9
-            return isSameOrNewer("0.9");
-        }
-    }
-
     public boolean isDaemonIdleTimeoutConfigurable() {
         return isSameOrNewer("1.0-milestone-7");
     }
 
     public boolean isOpenApiSupported() {
-        return isSameOrNewer("0.9-rc-1") && !isSameOrNewer("2.0");
+        return isSameOrNewer("0.9-rc-1") && !isSameOrNewer("2.0-rc-1");
     }
 
     public boolean isToolingApiSupported() {
         return isSameOrNewer("1.0-milestone-3");
+    }
+
+    @Override
+    public boolean isToolingApiTargetJvmSupported(JavaVersion javaVersion) {
+        if (isSameOrNewer("2.7")) {
+            return true;
+        }
+
+        // Gradle versions older than 2.7 did not fully support Java 1.9 as the target JVM
+        if (javaVersion.compareTo(JavaVersion.VERSION_1_9) >= 0) {
+            return false;
+        }
+
+        // Use Java 1.6 or later for Gradle 2.0 and later
+        if (isSameOrNewer("2.0")) {
+            return javaVersion.compareTo(JavaVersion.VERSION_1_6) >= 0;
+        }
+
+        // Use Java 1.5 or later for earlier Gradle versions
+        return javaVersion.compareTo(JavaVersion.VERSION_1_5) >= 0;
     }
 
     public boolean isToolingApiNonAsciiOutputSupported() {
@@ -113,9 +121,31 @@ public class DefaultGradleDistribution implements GradleDistribution {
         return true;
     }
 
+    public boolean isToolingApiDaemonBaseDirSupported() {
+        return isSameOrNewer("2.2-rc-1");
+    }
+
+    @Override
+    public boolean isToolingApiEventsInEmbeddedModeSupported() {
+        return isSameOrNewer("2.6-rc-1");
+    }
+
+    @Override
+    public boolean isToolingApiLoggingInEmbeddedModeSupported() {
+        return isSameOrNewer("2.9-rc-1");
+    }
+
     public VersionNumber getArtifactCacheLayoutVersion() {
-        if(isSameOrNewer("2.0-rc-1")) {
-            return VersionNumber.parse("2.11");
+        if (isSameOrNewer("2.8-rc-1")) {
+            return VersionNumber.parse("2.16");
+        } else if (isSameOrNewer("2.4-rc-1")) {
+            return VersionNumber.parse("2.15");
+        } else if (isSameOrNewer("2.2-rc-1")) {
+            return VersionNumber.parse("2.14");
+        } else if (isSameOrNewer("2.1-rc-3")) {
+            return VersionNumber.parse("2.13");
+        } else if (isSameOrNewer("2.0-rc-1")) {
+            return VersionNumber.parse("2.12");
         } else if (isSameOrNewer("1.12-rc-1")) {
             return VersionNumber.parse("2.6");
         } else if (isSameOrNewer("1.11-rc-1")) {
@@ -153,6 +183,10 @@ public class DefaultGradleDistribution implements GradleDistribution {
             }
         }
         return true;
+    }
+
+    public boolean isWrapperSupportsGradleUserHomeCommandLineOption() {
+        return isSameOrNewer("1.7");
     }
 
     public boolean isSupportsSpacesInGradleAndJavaOpts() {

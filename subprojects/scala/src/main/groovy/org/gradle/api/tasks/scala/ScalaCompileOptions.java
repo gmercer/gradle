@@ -17,19 +17,20 @@ package org.gradle.api.tasks.scala;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableMap;
-
-import org.gradle.api.tasks.Nested;
-import org.gradle.api.tasks.compile.AbstractOptions;
-import org.gradle.api.tasks.Input;
-import org.gradle.api.tasks.Optional;
-
-import java.util.List;
+import org.gradle.language.scala.tasks.BaseScalaCompileOptions;
+import org.gradle.util.CollectionUtils;
+import org.gradle.util.SingleMessageLogger;
 
 /**
- * Options for Scala compilation.
+ * Options for Scala compilation, including the use of the Ant-backed compiler.
  */
-public class ScalaCompileOptions extends AbstractOptions {
-    private static final long serialVersionUID = 0;
+public class ScalaCompileOptions extends BaseScalaCompileOptions {
+    private static final String USE_ANT_MSG = "The Ant-Based Scala compiler is deprecated, please see "
+        + "https://docs.gradle.org/current/userguide/scala_plugin.html";
+    private static final String FORK_MSG = "The fork option for the scala compiler is deprecated, please see "
+        + "https://docs.gradle.org/current/userguide/scala_plugin.html";
+    private static final String USE_COMPILE_DAEMON_MSG = "The Ant-Based Scala compiler and it's support for a compile "
+        + "daemon is deprecated, please see https://docs.gradle.org/current/userguide/scala_plugin.html";
 
     private static final ImmutableMap<String, String> FIELD_NAMES_TO_ANT_PROPERTIES = new ImmutableMap.Builder<String, String>()
             .put("loggingLevel", "logging")
@@ -42,50 +43,66 @@ public class ScalaCompileOptions extends AbstractOptions {
             .put("additionalParameters", "addparams")
             .build();
 
-    private boolean useCompileDaemon;
+    protected boolean fork = true;
 
-    private String daemonServer;
+    protected boolean useAnt;
 
-    private boolean failOnError = true;
+    protected boolean useCompileDaemon;
 
-    private boolean deprecation = true;
+    protected String daemonServer;
 
-    private boolean unchecked = true;
+    /**
+     * Tells whether to use Ant for compilation. If {@code true}, the standard Ant scalac (or fsc) task will be used for
+     * Scala and Java joint compilation. If {@code false}, the Zinc incremental compiler will be used
+     * instead. The latter can be significantly faster, especially if there are few source code changes
+     * between compiler runs. Defaults to {@code true}.
+     */
+    @Deprecated
+    public boolean isUseAnt() {
+        SingleMessageLogger.nagUserOfDeprecated("useAnt", USE_ANT_MSG);
+        return useAnt;
+    }
 
-    private String debugLevel;
 
-    private boolean optimize;
+    @Deprecated
+    public void setUseAnt(boolean useAnt) {
+        SingleMessageLogger.nagUserOfDeprecated("useAnt", USE_ANT_MSG);
+        this.useAnt = useAnt;
+        if (useAnt == fork) {
+            // Not using setFork so we don't get two deprecation nag messages.
+            fork = !useAnt;
+        }
+    }
 
-    private String encoding;
+    /**
+     * Whether to run the Scala compiler in a separate process. Defaults to {@code false}
+     * for the Ant based compiler ({@code useAnt = true}), and to {@code true} for the Zinc
+     * based compiler ({@code useAnt = false}).
+     */
+    @Deprecated
+    public boolean isFork() {
+        SingleMessageLogger.nagUserOfDeprecated("fork", FORK_MSG);
+        return fork;
+    }
 
-    private String force = "never";
-
-    private String targetCompatibility;
-
-    private List<String> additionalParameters;
-
-    private boolean listFiles;
-
-    private String loggingLevel;
-
-    private List<String> loggingPhases;
-
-    private boolean fork;
-
-    private ScalaForkOptions forkOptions = new ScalaForkOptions();
-
-    private boolean useAnt = true;
-
-    private IncrementalCompileOptions incrementalOptions = new IncrementalCompileOptions();
+    @Deprecated
+    public void setFork(boolean fork) {
+        SingleMessageLogger.nagUserOfDeprecated("fork", FORK_MSG);
+        this.fork = fork;
+    }
 
     /**
      * Whether to use the fsc compile daemon.
      */
+    @Deprecated
     public boolean isUseCompileDaemon() {
+        SingleMessageLogger.nagUserOfDeprecated("useCompileDaemon", USE_COMPILE_DAEMON_MSG);
         return useCompileDaemon;
     }
 
+    @Deprecated
     public void setUseCompileDaemon(boolean useCompileDaemon) {
+        SingleMessageLogger.nagUserOfDeprecated("useCompileDaemon", USE_COMPILE_DAEMON_MSG);
         this.useCompileDaemon = useCompileDaemon;
     }
 
@@ -96,218 +113,16 @@ public class ScalaCompileOptions extends AbstractOptions {
      * If not specified, launches the daemon on the localhost.
      * This parameter can only be specified if useCompileDaemon is true.
      */
+    @Deprecated
     public String getDaemonServer() {
+        SingleMessageLogger.nagUserOfDeprecated("daemonServer", USE_COMPILE_DAEMON_MSG);
         return daemonServer;
     }
 
+    @Deprecated
     public void setDaemonServer(String daemonServer) {
+        SingleMessageLogger.nagUserOfDeprecated("daemonServer", USE_COMPILE_DAEMON_MSG);
         this.daemonServer = daemonServer;
-    }
-
-    /**
-     * Fail the build on compilation errors.
-     */
-    public boolean isFailOnError() {
-        return failOnError;
-    }
-
-    public void setFailOnError(boolean failOnError) {
-        this.failOnError = failOnError;
-    }
-
-    /**
-     * Generate deprecation information.
-     */
-    public boolean isDeprecation() {
-        return deprecation;
-    }
-
-    public void setDeprecation(boolean deprecation) {
-        this.deprecation = deprecation;
-    }
-
-    /**
-     * Generate unchecked information.
-     */
-    public boolean isUnchecked() {
-        return unchecked;
-    }
-
-    public void setUnchecked(boolean unchecked) {
-        this.unchecked = unchecked;
-    }
-
-    /**
-     * Generate debugging information.
-     * Legal values: none, source, line, vars, notailcalls
-     */
-    @Input @Optional
-    public String getDebugLevel() {
-        return debugLevel;
-    }
-
-    public void setDebugLevel(String debugLevel) {
-        this.debugLevel = debugLevel;
-    }
-
-    /**
-     * Run optimizations.
-     */
-    @Input
-    public boolean isOptimize() {
-        return optimize;
-    }
-
-    public void setOptimize(boolean optimize) {
-        this.optimize = optimize;
-    }
-
-    /**
-     * Encoding of source files.
-     */
-    @Input @Optional
-    public String getEncoding() {
-        return encoding;
-    }
-
-    public void setEncoding(String encoding) {
-        this.encoding = encoding;
-    }
-
-    /**
-     * Whether to force the compilation of all files.
-     * Legal values:
-     * - never (only compile modified files)
-     * - changed (compile all files when at least one file is modified)
-     * - always (always recompile all files)
-     */
-    public String getForce() {
-        return force;
-    }
-
-    public void setForce(String force) {
-        this.force = force;
-    }
-
-    /**
-     * Returns which backend is to be used.
-     *
-     * @deprecated use {@link ScalaCompile#getTargetCompatibility} instead
-     */
-    @Input
-    @Optional
-    @Deprecated
-    public String getTargetCompatibility() {
-        return targetCompatibility;
-    }
-
-    /**
-     * Sets which backend is to be used.
-     *
-     * @deprecated use {@link ScalaCompile#setTargetCompatibility} instead
-     */
-    @Deprecated
-    public void setTargetCompatibility(String targetCompatibility) {
-        this.targetCompatibility = targetCompatibility;
-    }
-
-    /**
-     * Additional parameters passed to the compiler.
-     * Each parameter must start with '-'.
-     */
-    public List<String> getAdditionalParameters() {
-        return additionalParameters;
-    }
-
-    public void setAdditionalParameters(List<String> additionalParameters) {
-        this.additionalParameters = additionalParameters;
-    }
-
-    /**
-     * List files to be compiled.
-     */
-    public boolean isListFiles() {
-        return listFiles;
-    }
-
-    public void setListFiles(boolean listFiles) {
-        this.listFiles = listFiles;
-    }
-
-    /**
-     * Specifies the amount of logging.
-     * Legal values:  none, verbose, debug
-     */
-    public String getLoggingLevel() {
-        return loggingLevel;
-    }
-
-    public void setLoggingLevel(String loggingLevel) {
-        this.loggingLevel = loggingLevel;
-    }
-
-    /**
-     * Phases of the compiler to log.
-     * Legal values: namer, typer, pickler, uncurry, tailcalls, transmatch, explicitouter, erasure,
-     *               lambdalift, flatten, constructors, mixin, icode, jvm, terminal.
-     */
-    public List<String> getLoggingPhases() {
-        return loggingPhases;
-    }
-
-    public void setLoggingPhases(List<String> loggingPhases) {
-        this.loggingPhases = loggingPhases;
-    }
-
-    /**
-     * Whether to run the Scala compiler in a separate process. Defaults to {@code false}
-     * for the Ant based compiler ({@code useAnt = true}), and to {@code true} for the Zinc
-     * based compiler ({@code useAnt = false}).
-     */
-    public boolean isFork() {
-        return fork;
-    }
-
-    public void setFork(boolean fork) {
-        this.fork = fork;
-    }
-
-    /**
-     * Options for running the Scala compiler in a separate process. These options only take effect
-     * if {@code fork} is set to {@code true}.
-     */
-    public ScalaForkOptions getForkOptions() {
-        return forkOptions;
-    }
-
-    public void setForkOptions(ScalaForkOptions forkOptions) {
-        this.forkOptions = forkOptions;
-    }
-
-    /**
-     * Tells whether to use Ant for compilation. If {@code true}, the standard Ant scalac (or fsc) task will be used for
-     * Scala and Java joint compilation. If {@code false}, the Zinc incremental compiler will be used
-     * instead. The latter can be significantly faster, especially if there are few source code changes
-     * between compiler runs. Defaults to {@code true}.
-     */
-    public boolean isUseAnt() {
-        return useAnt;
-    }
-
-    public void setUseAnt(boolean useAnt) {
-        this.useAnt = useAnt;
-        if (!useAnt) {
-            setFork(true);
-        }
-    }
-
-    @Nested
-    public IncrementalCompileOptions getIncrementalOptions() {
-        return incrementalOptions;
-    }
-
-    public void setIncrementalOptions(IncrementalCompileOptions incrementalOptions) {
-        this.incrementalOptions = incrementalOptions;
     }
 
     protected boolean excludeFromAntProperties(String fieldName) {
@@ -316,7 +131,7 @@ public class ScalaCompileOptions extends AbstractOptions {
                 || fieldName.equals("useAnt")
                 || fieldName.equals("incrementalOptions")
                 || fieldName.equals("targetCompatibility") // handled directly by AntScalaCompiler
-                || fieldName.equals("optimize") && !optimize;
+                || fieldName.equals("optimize") && !isOptimize();
     }
 
     protected String getAntPropertyName(String fieldName) {
@@ -336,14 +151,11 @@ public class ScalaCompileOptions extends AbstractOptions {
         if (fieldName.equals("optimize")) {
             return toOnOffString(isOptimize());
         }
-        if (fieldName.equals("targetCompatibility")) {
-            return String.format("jvm-%s", getTargetCompatibility());
-        }
         if (fieldName.equals("loggingPhases")) {
-            return getLoggingPhases().isEmpty() ? " " : Joiner.on(',').join(getLoggingPhases());
+            return Joiner.on(",").join(getLoggingPhases());
         }
         if (fieldName.equals("additionalParameters")) {
-            return getAdditionalParameters().isEmpty() ? " " : Joiner.on(' ').join(getAdditionalParameters());
+            return CollectionUtils.asCommandLine(getAdditionalParameters());
         }
         return value;
     }
@@ -351,4 +163,6 @@ public class ScalaCompileOptions extends AbstractOptions {
     private String toOnOffString(boolean flag) {
         return flag ? "on" : "off";
     }
+
+
 }

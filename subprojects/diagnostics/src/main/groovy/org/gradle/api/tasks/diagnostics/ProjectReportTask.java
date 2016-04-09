@@ -18,19 +18,18 @@ package org.gradle.api.tasks.diagnostics;
 import org.apache.commons.lang.StringUtils;
 import org.gradle.api.Action;
 import org.gradle.api.Project;
+import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.tasks.diagnostics.internal.TextReportRenderer;
-import org.gradle.configuration.ImplicitTasksConfigurer;
 import org.gradle.initialization.BuildClientMetaData;
 import org.gradle.internal.graph.GraphRenderer;
-import org.gradle.logging.StyledTextOutput;
+import org.gradle.internal.logging.StyledTextOutput;
 import org.gradle.util.CollectionUtils;
 import org.gradle.util.GUtil;
 
-import javax.inject.Inject;
 import java.io.IOException;
 import java.util.List;
 
-import static org.gradle.logging.StyledTextOutput.Style.*;
+import static org.gradle.internal.logging.StyledTextOutput.Style.*;
 
 /**
  * <p>Displays a list of projects in the build. An instance of this type is used when you execute the {@code projects}
@@ -42,11 +41,6 @@ public class ProjectReportTask extends AbstractReportTask {
     @Override
     protected TextReportRenderer getRenderer() {
         return renderer;
-    }
-
-    @Inject
-    protected BuildClientMetaData getClientMetaData() {
-        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -64,20 +58,20 @@ public class ProjectReportTask extends AbstractReportTask {
         textOutput.println();
         textOutput.text("To see a list of the tasks of a project, run ");
         metaData.describeCommand(textOutput.withStyle(UserInput), String.format("<project-path>:%s",
-                ImplicitTasksConfigurer.TASKS_TASK));
+                ProjectInternal.TASKS_TASK));
         textOutput.println();
 
         textOutput.text("For example, try running ");
         Project exampleProject = project.getChildProjects().isEmpty() ? project : getChildren(project).get(0);
         metaData.describeCommand(textOutput.withStyle(UserInput), exampleProject.absoluteProjectPath(
-                ImplicitTasksConfigurer.TASKS_TASK));
+                ProjectInternal.TASKS_TASK));
         textOutput.println();
 
         if (project != project.getRootProject()) {
             textOutput.println();
             textOutput.text("To see a list of all the projects in this build, run ");
             metaData.describeCommand(textOutput.withStyle(UserInput), project.getRootProject().absoluteProjectPath(
-                    ImplicitTasksConfigurer.PROJECTS_TASK));
+                    ProjectInternal.PROJECTS_TASK));
             textOutput.println();
         }
     }

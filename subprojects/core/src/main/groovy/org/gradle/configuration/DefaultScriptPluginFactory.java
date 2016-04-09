@@ -16,173 +16,169 @@
 
 package org.gradle.configuration;
 
-import org.gradle.api.Transformer;
-import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.initialization.dsl.ScriptHandler;
+import org.gradle.api.internal.DocumentationRegistry;
+import org.gradle.api.internal.GradleInternal;
+import org.gradle.api.internal.SettingsInternal;
+import org.gradle.api.internal.cache.StringInterner;
 import org.gradle.api.internal.file.FileLookup;
+import org.gradle.api.internal.file.collections.DirectoryFileTreeFactory;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
 import org.gradle.api.internal.initialization.ScriptHandlerFactory;
-import org.gradle.api.internal.project.ProjectScript;
-import org.gradle.api.plugins.PluginAware;
+import org.gradle.api.internal.initialization.ScriptHandlerInternal;
+import org.gradle.api.internal.plugins.PluginManagerInternal;
+import org.gradle.api.internal.project.ProjectInternal;
+import org.gradle.api.tasks.util.PatternSet;
+import org.gradle.api.tasks.util.internal.PatternSets;
 import org.gradle.groovy.scripts.*;
-import org.gradle.groovy.scripts.internal.BuildScriptTransformer;
-import org.gradle.groovy.scripts.internal.PluginsAndBuildscriptTransformer;
-import org.gradle.groovy.scripts.internal.StatementExtractingScriptTransformer;
+import org.gradle.groovy.scripts.internal.*;
+import org.gradle.internal.Actions;
 import org.gradle.internal.Factory;
-import org.gradle.internal.classpath.ClassPath;
-import org.gradle.internal.classpath.DefaultClassPath;
-import org.gradle.internal.exceptions.LocationAwareException;
 import org.gradle.internal.reflect.Instantiator;
 import org.gradle.internal.service.DefaultServiceRegistry;
-import org.gradle.logging.LoggingManagerInternal;
-import org.gradle.plugin.internal.PluginDependenciesService;
-import org.gradle.plugin.internal.PluginRequestApplicator;
-import org.gradle.plugin.internal.PluginResolutionApplicator;
-import org.gradle.plugin.internal.PluginResolverFactory;
-import org.gradle.plugin.resolve.internal.InvalidPluginRequestException;
-import org.gradle.plugin.resolve.internal.NoopPluginResolver;
-import org.gradle.plugin.resolve.internal.PluginRequest;
-import org.gradle.plugin.resolve.internal.PluginResolver;
-import org.gradle.util.CollectionUtils;
-
-import java.io.File;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import org.gradle.internal.logging.LoggingManagerInternal;
+import org.gradle.model.dsl.internal.transform.ClosureCreationInterceptingVerifier;
+import org.gradle.model.internal.inspect.ModelRuleSourceDetector;
+import org.gradle.plugin.use.internal.PluginRequestApplicator;
+import org.gradle.plugin.use.internal.PluginRequests;
+import org.gradle.plugin.use.internal.PluginRequestsSerializer;
 
 public class DefaultScriptPluginFactory implements ScriptPluginFactory {
+    private final static StringInterner INTERNER = new StringInterner();
+
     private final ScriptCompilerFactory scriptCompilerFactory;
-    private final ImportsReader importsReader;
     private final Factory<LoggingManagerInternal> loggingManagerFactory;
     private final Instantiator instantiator;
     private final ScriptHandlerFactory scriptHandlerFactory;
-    private final PluginResolverFactory pluginResolverFactory;
+    private final PluginRequestApplicator pluginRequestApplicator;
     private final FileLookup fileLookup;
+    private final DirectoryFileTreeFactory directoryFileTreeFactory;
+    private final DocumentationRegistry documentationRegistry;
+    private final ModelRuleSourceDetector modelRuleSourceDetector;
+    private final BuildScriptDataSerializer buildScriptDataSerializer = new BuildScriptDataSerializer();
+    private final PluginRequestsSerializer pluginRequestsSerializer = new PluginRequestsSerializer();
 
     public DefaultScriptPluginFactory(ScriptCompilerFactory scriptCompilerFactory,
-                                      ImportsReader importsReader,
                                       Factory<LoggingManagerInternal> loggingManagerFactory,
                                       Instantiator instantiator,
                                       ScriptHandlerFactory scriptHandlerFactory,
-                                      PluginResolverFactory pluginResolverFactory,
-                                      FileLookup fileLookup) {
+                                      PluginRequestApplicator pluginRequestApplicator,
+                                      FileLookup fileLookup,
+                                      DirectoryFileTreeFactory directoryFileTreeFactory,
+                                      DocumentationRegistry documentationRegistry,
+                                      ModelRuleSourceDetector modelRuleSourceDetector) {
         this.scriptCompilerFactory = scriptCompilerFactory;
-        this.importsReader = importsReader;
         this.loggingManagerFactory = loggingManagerFactory;
         this.instantiator = instantiator;
         this.scriptHandlerFactory = scriptHandlerFactory;
-        this.pluginResolverFactory = pluginResolverFactory;
+        this.pluginRequestApplicator = pluginRequestApplicator;
         this.fileLookup = fileLookup;
+        this.directoryFileTreeFactory = directoryFileTreeFactory;
+        this.documentationRegistry = documentationRegistry;
+        this.modelRuleSourceDetector = modelRuleSourceDetector;
     }
 
-    public ScriptPlugin create(ScriptSource scriptSource, ScriptHandler scriptHandler, ClassLoaderScope classLoaderScope, String classpathClosureName, Class<? extends BasicScript> scriptClass, boolean ownerScript) {
-        return new ScriptPluginImpl(scriptSource, scriptHandler, classLoaderScope, classpathClosureName, scriptClass, ownerScript);
+    public ScriptPlugin create(ScriptSource scriptSource, ScriptHandler scriptHandler, ClassLoaderScope targetScope, ClassLoaderScope baseScope, boolean topLevelScript) {
+        return new ScriptPluginImpl(scriptSource, (ScriptHandlerInternal) scriptHandler, targetScope, baseScope, topLevelScript);
     }
 
     private class ScriptPluginImpl implements ScriptPlugin {
         private final ScriptSource scriptSource;
-        private final ClassLoaderScope classLoaderScope;
-        private final String classpathClosureName;
-        private final Class<? extends BasicScript> scriptType;
-        private final ScriptHandler scriptHandler;
-        private final boolean ownerScript;
+        private final ClassLoaderScope targetScope;
+        private final ClassLoaderScope baseScope;
+        private final ScriptHandlerInternal scriptHandler;
+        private final boolean topLevelScript;
 
-        public ScriptPluginImpl(ScriptSource scriptSource, ScriptHandler scriptHandler, ClassLoaderScope classLoaderScope, String classpathClosureName, Class<? extends BasicScript> scriptType, boolean ownerScript) {
+        public ScriptPluginImpl(ScriptSource scriptSource, ScriptHandlerInternal scriptHandler, ClassLoaderScope targetScope, ClassLoaderScope baseScope, boolean topLevelScript) {
             this.scriptSource = scriptSource;
-            this.classLoaderScope = classLoaderScope;
-            this.classpathClosureName = classpathClosureName;
+            this.targetScope = targetScope;
+            this.baseScope = baseScope;
             this.scriptHandler = scriptHandler;
-            this.scriptType = scriptType;
-            this.ownerScript = ownerScript;
+            this.topLevelScript = topLevelScript;
         }
-
 
         public ScriptSource getSource() {
             return scriptSource;
         }
 
         public void apply(final Object target) {
-            DefaultServiceRegistry services = new DefaultServiceRegistry();
+            final DefaultServiceRegistry services = new DefaultServiceRegistry() {
+                Factory<PatternSet> createPatternSetFactory() {
+                    return PatternSets.getNonCachingPatternSetFactory();
+                }
+            };
             services.add(ScriptPluginFactory.class, DefaultScriptPluginFactory.this);
             services.add(ScriptHandlerFactory.class, scriptHandlerFactory);
-            services.add(ClassLoaderScope.class, classLoaderScope);
+            services.add(ClassLoaderScope.class, targetScope);
             services.add(LoggingManagerInternal.class, loggingManagerFactory.create());
             services.add(Instantiator.class, instantiator);
             services.add(ScriptHandler.class, scriptHandler);
             services.add(FileLookup.class, fileLookup);
+            services.add(DirectoryFileTreeFactory.class, directoryFileTreeFactory);
+            services.add(ModelRuleSourceDetector.class, modelRuleSourceDetector);
 
-            ScriptSource withImports = importsReader.withImports(scriptSource);
+            final ScriptTarget scriptTarget = wrap(target);
 
-            PluginDependenciesService pluginDependenciesService = new PluginDependenciesService(getSource());
-            services.add(PluginDependenciesService.class, pluginDependenciesService);
+            ScriptCompiler compiler = scriptCompilerFactory.createCompiler(scriptSource);
 
-            ScriptCompiler compiler = scriptCompilerFactory.createCompiler(withImports);
-            compiler.setClassloader(classLoaderScope.getBase().getChildClassLoader());
+            // Pass 1, extract plugin requests and execute buildscript {}, ignoring (i.e. not even compiling) anything else
 
-            boolean supportsPluginsBlock = ProjectScript.class.isAssignableFrom(scriptType);
+            Class<? extends BasicScript> scriptType = scriptTarget.getScriptClass();
+            boolean supportsPluginsBlock = scriptTarget.getSupportsPluginsBlock();
             String onPluginBlockError = supportsPluginsBlock ? null : "Only Project build scripts can contain plugins {} blocks";
+            String classpathClosureName = scriptTarget.getClasspathBlockName();
+            InitialPassStatementTransformer initialPassStatementTransformer = new InitialPassStatementTransformer(classpathClosureName, onPluginBlockError, scriptSource, documentationRegistry);
+            SubsetScriptTransformer initialTransformer = new SubsetScriptTransformer(initialPassStatementTransformer);
+            String id = INTERNER.intern("cp_" + scriptTarget.getId());
+            CompileOperation<PluginRequests> initialOperation = new FactoryBackedCompileOperation<PluginRequests>(id, initialTransformer, initialPassStatementTransformer, pluginRequestsSerializer);
 
-            PluginsAndBuildscriptTransformer scriptBlockTransformer = new PluginsAndBuildscriptTransformer(classpathClosureName, onPluginBlockError);
+            ScriptRunner<? extends BasicScript, PluginRequests> initialRunner = compiler.compile(scriptType, initialOperation, baseScope.getExportClassLoader(), Actions.doNothing());
+            initialRunner.run(target, services);
 
-            StatementExtractingScriptTransformer classpathScriptTransformer = new StatementExtractingScriptTransformer(classpathClosureName, scriptBlockTransformer);
+            PluginRequests pluginRequests = initialRunner.getData();
+            PluginManagerInternal pluginManager = scriptTarget.getPluginManager();
+            pluginRequestApplicator.applyPlugins(pluginRequests, scriptHandler, pluginManager, targetScope);
 
-            compiler.setTransformer(classpathScriptTransformer);
+            // Pass 2, compile everything except buildscript {} and plugin requests, then run
+            BuildScriptTransformer buildScriptTransformer = new BuildScriptTransformer(classpathClosureName, scriptSource);
+            String operationId = scriptTarget.getId();
+            CompileOperation<BuildScriptData> operation = new FactoryBackedCompileOperation<BuildScriptData>(operationId, buildScriptTransformer, buildScriptTransformer, buildScriptDataSerializer);
 
-            ScriptRunner<? extends BasicScript> classPathScriptRunner = compiler.compile(scriptType);
-            classPathScriptRunner.getScript().init(target, services);
-            classPathScriptRunner.run();
+            final ScriptRunner<? extends BasicScript, BuildScriptData> runner = compiler.compile(scriptType, operation, targetScope.getLocalClassLoader(), ClosureCreationInterceptingVerifier.INSTANCE);
+            if (scriptTarget.getSupportsMethodInheritance() && runner.getHasMethods()) {
+                scriptTarget.attachScript(runner.getScript());
+            }
+            if (!runner.getRunDoesSomething()) {
+                return;
+            }
 
-            Configuration classpathConfiguration = scriptHandler.getConfigurations().getByName(ScriptHandler.CLASSPATH_CONFIGURATION);
-            Set<File> files = classpathConfiguration.getFiles();
-            ClassPath classPath = new DefaultClassPath(files);
-
-            ClassLoader exportedClassLoader = classLoaderScope.export(classPath);
-
-            List<PluginRequest> pluginRequests = pluginDependenciesService.getRequests();
-            if (!pluginRequests.isEmpty()) {
-
-                Map<String, List<PluginRequest>> groupedById = CollectionUtils.groupBy(pluginRequests, new Transformer<String, PluginRequest>() {
-                    public String transform(PluginRequest pluginRequest) {
-                        return pluginRequest.getId();
-                    }
-                });
-
-                // Ignore duplicate noops - noop plugin just used for testing
-                groupedById.remove(NoopPluginResolver.PLUGIN_ID);
-
-                // Check for duplicates
-                for (Map.Entry<String, List<PluginRequest>> entry : groupedById.entrySet()) {
-                    List<PluginRequest> pluginRequestsForId = entry.getValue();
-                    if (pluginRequestsForId.size() > 1) {
-                        PluginRequest first = pluginRequests.get(0);
-                        PluginRequest second = pluginRequests.get(1);
-
-                        InvalidPluginRequestException exception = new InvalidPluginRequestException(second, "Plugin with id '" + entry.getKey() + "' was already requested at line " + first.getLineNumber());
-                        throw new LocationAwareException(exception, second.getScriptSource(), second.getLineNumber());
-                    }
+            Runnable buildScriptRunner = new Runnable() {
+                public void run() {
+                    runner.run(target, services);
                 }
+            };
 
-                PluginResolver pluginResolver = pluginResolverFactory.createPluginResolver(exportedClassLoader);
-                @SuppressWarnings("ConstantConditions")
-                PluginResolutionApplicator resolutionApplicator = new PluginResolutionApplicator((PluginAware) target, classLoaderScope);
-                PluginRequestApplicator requestApplicator = new PluginRequestApplicator(pluginResolver, resolutionApplicator);
-                requestApplicator.applyPlugin(pluginRequests);
+            boolean hasImperativeStatements = runner.getData().getHasImperativeStatements();
+            scriptTarget.addConfiguration(buildScriptRunner, !hasImperativeStatements);
+        }
+
+        private ScriptTarget wrap(Object target) {
+            if (target instanceof ProjectInternal && topLevelScript) {
+                // Only use this for top level project scripts
+                return new ProjectScriptTarget((ProjectInternal) target);
             }
-
-            classLoaderScope.lock();
-
-            compiler.setClassloader(classLoaderScope.getScopeClassLoader());
-
-            compiler.setTransformer(new BuildScriptTransformer("no_" + classpathScriptTransformer.getId(), classpathScriptTransformer.invert()));
-            ScriptRunner<? extends BasicScript> runner = compiler.compile(scriptType);
-
-            BasicScript script = runner.getScript();
-            script.init(target, services);
-            if (ownerScript && target instanceof ScriptAware) {
-                ((ScriptAware) target).setScript(script);
+            if (target instanceof GradleInternal && topLevelScript) {
+                // Only use this for top level init scripts
+                return new InitScriptTarget((GradleInternal) target);
             }
-            runner.run();
+            if (target instanceof SettingsInternal && topLevelScript) {
+                // Only use this for top level settings scripts
+                return new SettingScriptTarget((SettingsInternal) target);
+            } else {
+                return new DefaultScriptTarget(target);
+            }
         }
 
     }
+
 }

@@ -22,7 +22,7 @@ import org.gradle.internal.concurrent.Stoppable;
 import org.gradle.launcher.daemon.context.DaemonContext;
 import org.gradle.launcher.daemon.logging.DaemonMessages;
 import org.gradle.launcher.daemon.registry.DaemonRegistry;
-import org.gradle.messaging.remote.Address;
+import org.gradle.internal.remote.Address;
 
 class DomainRegistryUpdater implements Stoppable {
 
@@ -40,7 +40,7 @@ class DomainRegistryUpdater implements Stoppable {
     }
 
     public void onStartActivity() {
-        LOGGER.info("Marking the daemon as busy, address: " + connectorAddress);
+        LOGGER.info("Marking the daemon as busy, address: {}", connectorAddress);
         try {
             daemonRegistry.markBusy(connectorAddress);
         } catch (DaemonRegistry.EmptyRegistryException e) {
@@ -49,7 +49,7 @@ class DomainRegistryUpdater implements Stoppable {
     }
 
     public void onCompleteActivity() {
-        LOGGER.info("Marking the daemon as idle, address: " + connectorAddress);
+        LOGGER.info("Marking the daemon as idle, address: {}", connectorAddress);
         try {
             daemonRegistry.markIdle(connectorAddress);
         } catch (DaemonRegistry.EmptyRegistryException e) {
@@ -58,14 +58,14 @@ class DomainRegistryUpdater implements Stoppable {
     }
 
     public void onStart(Address connectorAddress) {
-        LOGGER.info(DaemonMessages.ADVERTISING_DAEMON + connectorAddress);
+        LOGGER.info("{}{}", DaemonMessages.ADVERTISING_DAEMON, connectorAddress);
         LOGGER.debug("Advertised daemon context: {}", daemonContext);
         this.connectorAddress = connectorAddress;
         daemonRegistry.store(connectorAddress, daemonContext, password, false);
     }
 
     public void stop() {
-        LOGGER.debug("Removing our presence to clients, eg. removing this address from the registry: " + connectorAddress);
+        LOGGER.debug("Removing our presence to clients, eg. removing this address from the registry: {}", connectorAddress);
         try {
             daemonRegistry.remove(connectorAddress);
         } catch (DaemonRegistry.EmptyRegistryException e) {

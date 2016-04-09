@@ -20,6 +20,7 @@ import org.gradle.api.internal.TaskExecutionHistory;
 import org.gradle.api.internal.TaskInternal;
 import org.gradle.api.internal.changedetection.TaskArtifactState;
 import org.gradle.api.internal.changedetection.TaskArtifactStateRepository;
+import org.gradle.api.internal.changedetection.state.FilesSnapshotSet;
 import org.gradle.api.tasks.incremental.IncrementalTaskInputs;
 import org.gradle.internal.reflect.Instantiator;
 
@@ -68,12 +69,14 @@ public class ShortCircuitTaskArtifactStateRepository implements TaskArtifactStat
         }
 
         public boolean isUpToDate(Collection<String> messages) {
-            messages.add(reason);
+            if (messages != null) {
+                messages.add(reason);
+            }
             return false;
         }
 
         public IncrementalTaskInputs getInputChanges() {
-            return instantiator.newInstance(RebuildIncrementalTaskInputs.class, task);
+            return instantiator.newInstance(RebuildIncrementalTaskInputs.class, task, FilesSnapshotSet.EMPTY);
         }
 
         public TaskExecutionHistory getExecutionHistory() {
@@ -88,8 +91,8 @@ public class ShortCircuitTaskArtifactStateRepository implements TaskArtifactStat
             delegate.afterTask();
         }
 
-        public void finished() {
-            delegate.finished();
+        public void finished(boolean wasUpToDate) {
+            delegate.finished(wasUpToDate);
         }
     }
 

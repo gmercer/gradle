@@ -32,6 +32,9 @@ public class HashUtil {
     public static HashValue createHash(File file, String algorithm) {
         try {
             return createHash(new FileInputStream(file), algorithm);
+        } catch (UncheckedIOException e) {
+            // Catch any unchecked io exceptions and add the file path for troubleshooting
+            throw new UncheckedIOException(String.format("Failed to create %s hash for file %s.", algorithm, file.getAbsolutePath()), e.getCause());
         } catch (FileNotFoundException e) {
             throw new UncheckedIOException(e);
         }
@@ -81,5 +84,17 @@ public class HashUtil {
 
     public static HashValue sha1(File file) {
         return createHash(file, "SHA1");
+    }
+
+    public static HashValue sha256(byte[] bytes) {
+        return createHash(new ByteArrayInputStream(bytes), "SHA-256");
+    }
+
+    public static HashValue sha256(InputStream inputStream) {
+        return createHash(inputStream, "SHA-256");
+    }
+
+    public static HashValue sha256(File file) {
+        return createHash(file, "SHA-256");
     }
 }

@@ -19,7 +19,6 @@ package org.gradle.plugins.ide.internal.tooling.idea;
 import org.gradle.tooling.internal.gradle.DefaultGradleProject;
 import org.gradle.tooling.internal.gradle.GradleProjectIdentity;
 import org.gradle.tooling.model.idea.IdeaCompilerOutput;
-import org.gradle.tooling.model.idea.IdeaContentRoot;
 
 import java.io.Serializable;
 import java.util.Collection;
@@ -29,13 +28,15 @@ import java.util.List;
 
 public class DefaultIdeaModule implements Serializable, GradleProjectIdentity {
     private String name;
-    private List<? extends IdeaContentRoot> contentRoots = new LinkedList<IdeaContentRoot>();
+    private List<DefaultIdeaContentRoot> contentRoots = new LinkedList<DefaultIdeaContentRoot>();
     private DefaultIdeaProject parent;
 
     private List<DefaultIdeaDependency> dependencies = new LinkedList<DefaultIdeaDependency>();
     private DefaultGradleProject<?> gradleProject;
 
     private IdeaCompilerOutput compilerOutput;
+
+    private DefaultIdeaJavaLanguageSettings javaLanguageSettings;
 
     public String getName() {
         return name;
@@ -46,11 +47,11 @@ public class DefaultIdeaModule implements Serializable, GradleProjectIdentity {
         return this;
     }
 
-    public Collection<? extends IdeaContentRoot> getContentRoots() {
+    public Collection<DefaultIdeaContentRoot> getContentRoots() {
         return contentRoots;
     }
 
-    public DefaultIdeaModule setContentRoots(List<? extends IdeaContentRoot> contentRoots) {
+    public DefaultIdeaModule setContentRoots(List<DefaultIdeaContentRoot> contentRoots) {
         this.contentRoots = contentRoots;
         return this;
     }
@@ -104,6 +105,15 @@ public class DefaultIdeaModule implements Serializable, GradleProjectIdentity {
 
     public DefaultIdeaModule setCompilerOutput(IdeaCompilerOutput compilerOutput) {
         this.compilerOutput = compilerOutput;
+        return this;
+    }
+
+    public DefaultIdeaJavaLanguageSettings getJavaLanguageSettings() {
+        return javaLanguageSettings;
+    }
+
+    public DefaultIdeaModule setJavaLanguageSettings(DefaultIdeaJavaLanguageSettings javaLanguageSettings) {
+        this.javaLanguageSettings = javaLanguageSettings;
         return this;
     }
 

@@ -16,13 +16,15 @@
 package org.gradle.api.plugins.quality
 
 import org.gradle.api.GradleException
+import org.gradle.api.Incubating
 import org.gradle.api.file.FileCollection
 import org.gradle.api.internal.project.IsolatedAntBuilder
 import org.gradle.api.plugins.quality.internal.CheckstyleReportsImpl
 import org.gradle.api.reporting.Reporting
+import org.gradle.api.resources.TextResource
 import org.gradle.api.tasks.*
 import org.gradle.internal.reflect.Instantiator
-import org.gradle.logging.ConsoleRenderer
+import org.gradle.internal.logging.ConsoleRenderer
 
 import javax.inject.Inject
 
@@ -43,10 +45,27 @@ class Checkstyle extends SourceTask implements VerificationTask, Reporting<Check
     FileCollection classpath
 
     /**
+     * The Checkstyle configuration to use. Replaces the {@code configFile} property.
+     *
+     * @since 2.2
+     */
+    @Incubating
+    @Nested
+    TextResource config
+
+    /**
      * The Checkstyle configuration file to use.
      */
-    @InputFile
-    File configFile
+    File getConfigFile() {
+        getConfig()?.asFile()
+    }
+
+    /**
+     * The Checkstyle configuration file to use.
+     */
+    void setConfigFile(File configFile) {
+        setConfig(project.resources.text.fromFile(configFile))
+    }
 
     /**
      * The properties available for use in the configuration file. These are substituted into the configuration
@@ -90,8 +109,8 @@ class Checkstyle extends SourceTask implements VerificationTask, Reporting<Check
      * <pre>
      * checkstyleTask {
      *   reports {
-     *     xml {
-     *       destination "build/codenarc.xml"
+     *     html {
+     *       destination "build/codenarc.html"
      *     }
      *   }
      * }
@@ -118,15 +137,21 @@ class Checkstyle extends SourceTask implements VerificationTask, Reporting<Check
     public void run() {
         def propertyName = "org.gradle.checkstyle.violations"
         antBuilder.withClasspath(getCheckstyleClasspath()).execute {
-            ant.taskdef(name: 'checkstyle', classname: 'com.puppycrawl.tools.checkstyle.CheckStyleTask')
+            try {
+                ant.taskdef(name: 'checkstyle', classname: 'com.puppycrawl.tools.checkstyle.CheckStyleTask')
+            } catch (ClassNotFoundException cnfe) {
+                ant.taskdef(name: 'checkstyle', classname: 'com.puppycrawl.tools.checkstyle.ant.CheckstyleAntTask')
+            }
 
-            ant.checkstyle(config: getConfigFile(), failOnViolation: false, failureProperty: propertyName) {
+            ant.checkstyle(config: getConfig().asFile(), failOnViolation: false, failureProperty: propertyName) {
                 getSource().addToAntBuilder(ant, 'fileset', FileCollection.AntType.FileSet)
                 getClasspath().addToAntBuilder(ant, 'classpath')
+
                 if (showViolations) {
                     formatter(type: 'plain', useFile: false)
                 }
-                if (reports.xml.enabled) {
+
+                if (reports.xml.enabled || reports.html.enabled) {
                     formatter(type: 'xml', toFile: reports.xml.destination)
                 }
 
@@ -135,9 +160,19 @@ class Checkstyle extends SourceTask implements VerificationTask, Reporting<Check
                 }
             }
 
+            if (reports.html.enabled) {
+                def stylesheet = reports.html.stylesheet ? reports.html.stylesheet.asString() :
+                    Checkstyle.getClassLoader().getResourceAsStream('checkstyle-noframes-sorted.xsl').text
+                ant.xslt(in: reports.xml.destination, out: reports.html.destination) {
+                    style {
+                        string(value: stylesheet)
+                    }
+                }
+            }
+
             if (ant.project.properties[propertyName]) {
                 def message = "Checkstyle rule violations were found."
-                def report = reports.firstEnabled
+                def report = reports.html.enabled ? reports.html : reports.xml.enabled ? reports.xml : null
                 if (report) {
                     def reportUrl = new ConsoleRenderer().asClickableFileUrl(report.destination)
                     message += " See the report at: $reportUrl"

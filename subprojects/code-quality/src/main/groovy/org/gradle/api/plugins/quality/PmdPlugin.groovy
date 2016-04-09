@@ -16,6 +16,7 @@
 package org.gradle.api.plugins.quality
 
 import org.gradle.api.JavaVersion
+import org.gradle.api.plugins.JavaPluginConvention
 import org.gradle.api.plugins.quality.internal.AbstractCodeQualityPlugin
 import org.gradle.api.tasks.SourceSet
 import org.gradle.util.VersionNumber
@@ -33,6 +34,7 @@ import org.gradle.util.VersionNumber
  * @see Pmd
  */
 class PmdPlugin extends AbstractCodeQualityPlugin<Pmd> {
+    public static final String DEFAULT_PMD_VERSION = "5.2.3"
     private PmdExtension extension
 
     @Override
@@ -49,15 +51,12 @@ class PmdPlugin extends AbstractCodeQualityPlugin<Pmd> {
     protected CodeQualityExtension createExtension() {
         extension = project.extensions.create("pmd", PmdExtension, project)
         extension.with {
-            toolVersion = "4.3"
-            // NOTE: should change default rule set to java-basic once we bump default version to 5.0+
-            // this will also require a change to Pmd.run() (convert java-basic to basic for old versions,
-            // instead of basic to java-basic for new versions)
-            ruleSets = ["basic"]
+            toolVersion = DEFAULT_PMD_VERSION
+            ruleSets = ["java-basic"]
             ruleSetFiles = project.files()
         }
-        extension.getConventionMapping().with{
-            targetJdk = { getDefaultTargetJdk(project.sourceCompatibility) }
+        extension.getConventionMapping().with {
+            targetJdk = { getDefaultTargetJdk(project.convention.getPlugin(JavaPluginConvention).sourceCompatibility) }
         }
         return extension
     }
@@ -75,19 +74,19 @@ class PmdPlugin extends AbstractCodeQualityPlugin<Pmd> {
     @Override
     protected void configureTaskDefaults(Pmd task, String baseName) {
         def config = project.configurations['pmd']
-        config.incoming.beforeResolve {
-            if (config.dependencies.empty) {
-                VersionNumber version = VersionNumber.parse(extension.toolVersion)
-                String dependency = (version < VersionNumber.parse("5.0.0"))?
-                    "pmd:pmd:$extension.toolVersion" : "net.sourceforge.pmd:pmd:$extension.toolVersion"
-                config.dependencies.add(project.dependencies.create(dependency))
-            }
+        config.defaultDependencies { dependencies ->
+            VersionNumber version = VersionNumber.parse(this.extension.toolVersion)
+            String dependency = calculateDefaultDependencyNotation(version)
+            dependencies.add(this.project.dependencies.create(dependency))
         }
         task.conventionMapping.with {
             pmdClasspath = { config }
             ruleSets = { extension.ruleSets }
+            ruleSetConfig = { extension.ruleSetConfig }
             ruleSetFiles = { extension.ruleSetFiles }
             ignoreFailures = { extension.ignoreFailures }
+            rulePriority = { extension.rulePriority }
+            consoleOutput = { extension.consoleOutput }
             targetJdk = { extension.targetJdk }
             task.reports.all { report ->
                 report.conventionMapping.with {
@@ -98,11 +97,23 @@ class PmdPlugin extends AbstractCodeQualityPlugin<Pmd> {
         }
     }
 
+    private String calculateDefaultDependencyNotation(VersionNumber toolVersion) {
+        if (toolVersion < VersionNumber.version(5)) {
+            return "pmd:pmd:$extension.toolVersion"
+        } else if (toolVersion < VersionNumber.parse("5.2.0")) {
+            return "net.sourceforge.pmd:pmd:$extension.toolVersion"
+        }
+        return "net.sourceforge.pmd:pmd-java:$extension.toolVersion"
+    }
+
     @Override
     protected void configureForSourceSet(SourceSet sourceSet, Pmd task) {
         task.with {
             description = "Run PMD analysis for ${sourceSet.name} classes"
         }
         task.setSource(sourceSet.allJava)
+        task.conventionMapping.with {
+            classpath = { sourceSet.compileClasspath }
+        }
     }
 }

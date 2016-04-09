@@ -32,6 +32,7 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
     String type = 'jar'
     String packaging
     int publishCount = 1
+    boolean noMetaData
     private final List dependencies = []
     private final List artifacts = []
     final updateFormat = new SimpleDateFormat("yyyyMMddHHmmss")
@@ -77,15 +78,20 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
         return "${timestampFormat.format(publishTimestamp)}-${publishCount}"
     }
 
-    MavenModule dependsOn(String... dependencyArtifactIds) {
+    MavenModule dependsOnModules(String... dependencyArtifactIds) {
         for (String id : dependencyArtifactIds) {
             dependsOn(groupId, id, '1.0')
         }
         return this
     }
 
-    MavenModule dependsOn(String group, String artifactId, String version, String type = null) {
-        this.dependencies << [groupId: group, artifactId: artifactId, version: version, type: type]
+    @Override
+    MavenModule dependsOn(MavenModule module) {
+        return dependsOn(module.groupId, module.artifactId, module.version)
+    }
+
+    MavenModule dependsOn(String group, String artifactId, String version, String type = null, String scope = null, String classifier = null, Collection<Map> exclusions = null) {
+        this.dependencies << [groupId: group, artifactId: artifactId, version: version, type: type, scope: scope, classifier: classifier, exclusions: exclusions]
         return this
     }
 
@@ -162,24 +168,25 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
      * Asserts that exactly the given artifacts have been deployed, along with their checksum files
      */
     void assertArtifactsPublished(String... names) {
-        def artifactNames = names as Set
-        if (publishesMetaDataFile()) {
-            artifactNames.add(MAVEN_METADATA_FILE)
+        Set allFileNames = []
+        for (name in names) {
+            allFileNames.addAll([name, "${name}.sha1", "${name}.md5"])
         }
-        assert moduleDir.isDirectory()
-        Set actual = moduleDir.list() as Set
-        for (name in artifactNames) {
-            assert actual.remove(name)
 
-            if(publishesHashFiles()) {
-                assert actual.remove("${name}.md5" as String)
-                assert actual.remove("${name}.sha1" as String)
-            }
+        assert moduleDir.list() as Set == allFileNames
+        for (name in names) {
+            assertChecksumsPublishedFor(moduleDir.file(name))
         }
-        assert actual.isEmpty()
     }
 
-    //abstract String getPublishArtifactVersion()
+    void assertChecksumsPublishedFor(TestFile testFile) {
+        def sha1File = sha1File(testFile)
+        sha1File.assertIsFile()
+        assert new BigInteger(sha1File.text, 16) == getHash(testFile, "SHA1")
+        def md5File = md5File(testFile)
+        md5File.assertIsFile()
+        assert new BigInteger(md5File.text, 16) == getHash(testFile, "MD5")
+    }
 
     MavenPom getParsedPom() {
         return new MavenPom(pomFile)
@@ -190,6 +197,10 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
     }
 
     TestFile getPomFile() {
+        return getArtifactFile(type: 'pom')
+    }
+
+    TestFile getPomFileForPublish() {
         return moduleDir.file("$artifactId-${publishArtifactVersion}.pom")
     }
 
@@ -238,7 +249,7 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
             }
         }
 
-        publish(pomFile) { Writer writer ->
+        publish(pomFileForPublish) { Writer writer ->
             def pomPackaging = packaging ?: type;
             new MarkupBuilder(writer).project {
                 mkp.comment(artifactContent)
@@ -261,9 +272,27 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
                             dependency {
                                 groupId(dep.groupId)
                                 artifactId(dep.artifactId)
-                                version(dep.version)
+                                if (dep.version) {
+                                    version(dep.version)
+                                }
                                 if (dep.type) {
                                     type(dep.type)
+                                }
+                                if (dep.scope) {
+                                    scope(dep.scope)
+                                }
+                                if (dep.classifier) {
+                                    classifier(dep.classifier)
+                                }
+                                if (dep.exclusions) {
+                                    exclusions {
+                                        for (exc in dep.exclusions) {
+                                            exclusion {
+                                                groupId(exc.groupId)
+                                                artifactId(exc.artifactId)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -296,9 +325,16 @@ abstract class AbstractMavenModule extends AbstractModule implements MavenModule
 
     abstract String getMetaDataFileContent()
 
-    MavenModule publish() {
 
-        publishPom()
+    MavenModule withNoMetaData() {
+        noMetaData = true
+        return this
+    }
+
+    MavenModule publish() {
+        if(!noMetaData) {
+            publishPom()
+        }
 
         artifacts.each { artifact ->
             publishArtifact(artifact)

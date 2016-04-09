@@ -17,34 +17,34 @@
 package org.gradle.api.tasks.diagnostics.internal.insight;
 
 import org.gradle.api.artifacts.component.*;
-import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionMatcher;
+import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionComparator;
+import org.gradle.api.internal.artifacts.ivyservice.ivyresolve.strategy.VersionSelectorScheme;
 import org.gradle.api.tasks.diagnostics.internal.graph.nodes.DependencyEdge;
 import org.gradle.util.CollectionUtils;
 
 import java.util.Collection;
 import java.util.Comparator;
 
-/**
- * Created: 17/08/2012
- */
 public class DependencyResultSorter {
-
     /**
      * sorts by group:name:version mostly.
      * If requested matches selected then it will override the version comparison
      * so that the dependency that was selected is more prominent.
      */
-    public static Collection<DependencyEdge> sort(Collection<DependencyEdge> input, VersionMatcher versionMatcher) {
-        return CollectionUtils.sort(input, new DependencyComparator(versionMatcher));
+    public static Collection<DependencyEdge> sort(Collection<DependencyEdge> input, VersionSelectorScheme versionSelectorScheme, VersionComparator versionComparator) {
+        return CollectionUtils.sort(input, new DependencyComparator(versionSelectorScheme, versionComparator));
     }
 
     private static class DependencyComparator implements Comparator<DependencyEdge> {
-        private final VersionMatcher matcher;
+        private final VersionSelectorScheme versionSelectorScheme;
+        private final Comparator<String> versionComparator;
 
-        private DependencyComparator(VersionMatcher matcher) {
-            this.matcher = matcher;
+        private DependencyComparator(VersionSelectorScheme versionSelectorScheme, VersionComparator versionComparator) {
+            this.versionSelectorScheme = versionSelectorScheme;
+            this.versionComparator = versionComparator.asStringComparator();
         }
 
+        @Override
         public int compare(DependencyEdge left, DependencyEdge right) {
             checkRequestedComponentSelectorType(left);
             checkRequestedComponentSelectorType(right);
@@ -123,8 +123,8 @@ public class DependencyResultSorter {
             }
 
             //order dynamic selectors after static selectors
-            boolean leftDynamic = matcher.isDynamic(leftRequested.getVersion());
-            boolean rightDynamic = matcher.isDynamic(rightRequested.getVersion());
+            boolean leftDynamic = versionSelectorScheme.parseSelector(leftRequested.getVersion()).isDynamic();
+            boolean rightDynamic = versionSelectorScheme.parseSelector(rightRequested.getVersion()).isDynamic();
             if (leftDynamic && !rightDynamic) {
                 return 1;
             } else if (!leftDynamic && rightDynamic) {
@@ -137,7 +137,7 @@ public class DependencyResultSorter {
                 byVersion = leftRequested.getVersion().compareTo(rightRequested.getVersion());
             } else {
                 // order static selectors semantically
-                byVersion = matcher.compare(leftRequested.getVersion(), rightRequested.getVersion());
+                byVersion = compareVersions(leftRequested.getVersion(), rightRequested.getVersion());
             }
             if (byVersion != 0) {
                 return byVersion;
@@ -183,7 +183,11 @@ public class DependencyResultSorter {
                 return byModule;
             }
 
-            return matcher.compare(leftFrom.getVersion(), rightFrom.getVersion());
+            return compareVersions(leftFrom.getVersion(), rightFrom.getVersion());
+        }
+
+        private int compareVersions(String left, String right) {
+            return versionComparator.compare(left, right);
         }
 
         private boolean isLeftAndRightFromProjectComponentIdentifier(ComponentIdentifier left, ComponentIdentifier right) {

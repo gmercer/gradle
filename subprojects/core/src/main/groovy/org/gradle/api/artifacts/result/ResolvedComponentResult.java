@@ -27,6 +27,7 @@ import java.util.Set;
  * Represents a component instance in the resolved dependency graph. Provides some basic identity and dependency information about the component.
  */
 @Incubating
+// Should really be named ComponentGraphResult
 public interface ResolvedComponentResult {
 
     /**

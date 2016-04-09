@@ -16,22 +16,25 @@
 
 package org.gradle.api.internal.changedetection.state;
 
-import org.gradle.messaging.serialize.SerializerRegistry;
+import org.gradle.api.file.FileTreeElement;
+import org.gradle.api.internal.hash.Hasher;
+import org.gradle.internal.resource.TextResource;
 
 import java.io.File;
 
-public interface FileSnapshotter {
+public interface FileSnapshotter extends Hasher {
     /**
-     * Registers Serializers to use to persist the {@link FileSnapshot} instances that this snapshotter produces.
+     * Takes a snapshot of the current content of the given resource. The provided resource must have content available.
      */
-    void registerSerializers(SerializerRegistry<FileSnapshot> registry);
+    FileSnapshot snapshot(TextResource resource);
 
     /**
      * Takes a snapshot of the current content of the given file. The provided file must exist and be a file (rather than, say, a directory).
      */
     FileSnapshot snapshot(File file);
 
-    interface FileSnapshot {
-        byte[] getHash();
-    }
+    /**
+     * Takes a snapshot of the current content of the given file, assuming the given file metadata. The provided file must exist and be a file (rather than, say, a directory).
+     */
+    FileSnapshot snapshot(FileTreeElement fileDetails);
 }

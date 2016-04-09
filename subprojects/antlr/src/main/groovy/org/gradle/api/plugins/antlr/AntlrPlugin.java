@@ -18,10 +18,11 @@ package org.gradle.api.plugins.antlr;
 
 import org.gradle.api.Action;
 import org.gradle.api.Plugin;
+import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
-import org.gradle.api.internal.file.FileResolver;
+import org.gradle.api.artifacts.DependencySet;
+import org.gradle.api.internal.file.SourceDirectorySetFactory;
 import org.gradle.api.internal.plugins.DslObject;
-import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.internal.tasks.DefaultSourceSet;
 import org.gradle.api.plugins.JavaPlugin;
 import org.gradle.api.plugins.JavaPluginConvention;
@@ -37,23 +38,43 @@ import static org.gradle.api.plugins.JavaPlugin.COMPILE_CONFIGURATION_NAME;
 /**
  * A plugin for adding Antlr support to {@link JavaPlugin java projects}.
  */
-public class AntlrPlugin implements Plugin<ProjectInternal> {
+public class AntlrPlugin implements Plugin<Project> {
     public static final String ANTLR_CONFIGURATION_NAME = "antlr";
-    private final FileResolver fileResolver;
+    private final SourceDirectorySetFactory sourceDirectorySetFactory;
 
     @Inject
-    public AntlrPlugin(FileResolver fileResolver) {
-        this.fileResolver = fileResolver;
+    public AntlrPlugin(SourceDirectorySetFactory sourceDirectorySetFactory) {
+        this.sourceDirectorySetFactory = sourceDirectorySetFactory;
     }
 
-    public void apply(final ProjectInternal project) {
-        project.getPlugins().apply(JavaPlugin.class);
+    public void apply(final Project project) {
+        project.getPluginManager().apply(JavaPlugin.class);
 
         // set up a configuration named 'antlr' for the user to specify the antlr libs to use in case
         // they want a specific version etc.
-        Configuration antlrConfiguration = project.getConfigurations().create(ANTLR_CONFIGURATION_NAME).setVisible(false)
-                .setTransitive(false).setDescription("The Antlr libraries to be used for this project.");
+        final Configuration antlrConfiguration = project.getConfigurations().create(ANTLR_CONFIGURATION_NAME)
+                .setVisible(false)
+                .setDescription("The Antlr libraries to be used for this project.");
+
+        antlrConfiguration.defaultDependencies(new Action<DependencySet>() {
+            @Override
+            public void execute(DependencySet dependencies) {
+                dependencies.add(project.getDependencies().create("antlr:antlr:2.7.7@jar"));
+            }
+        });
+
         project.getConfigurations().getByName(COMPILE_CONFIGURATION_NAME).extendsFrom(antlrConfiguration);
+
+        // Wire the antlr configuration into all antlr tasks
+        project.getTasks().withType(AntlrTask.class, new Action<AntlrTask>() {
+            public void execute(AntlrTask antlrTask) {
+                antlrTask.getConventionMapping().map("antlrClasspath", new Callable<Object>() {
+                    public Object call() throws Exception {
+                        return project.getConfigurations().getByName(ANTLR_CONFIGURATION_NAME);
+                    }
+                });
+            }
+        });
 
         project.getConvention().getPlugin(JavaPluginConvention.class).getSourceSets().all(
                 new Action<SourceSet>() {
@@ -61,7 +82,7 @@ public class AntlrPlugin implements Plugin<ProjectInternal> {
                         // for each source set we will:
                         // 1) Add a new 'antlr' virtual directory mapping
                         final AntlrSourceVirtualDirectoryImpl antlrDirectoryDelegate
-                                = new AntlrSourceVirtualDirectoryImpl(((DefaultSourceSet) sourceSet).getDisplayName(), fileResolver);
+                                = new AntlrSourceVirtualDirectoryImpl(((DefaultSourceSet) sourceSet).getDisplayName(), sourceDirectorySetFactory);
                         new DslObject(sourceSet).getConvention().getPlugins().put(
                                 AntlrSourceVirtualDirectory.NAME, antlrDirectoryDelegate);
                         final String srcDir = String.format("src/%s/antlr", sourceSet.getName());
@@ -78,15 +99,7 @@ public class AntlrPlugin implements Plugin<ProjectInternal> {
                         // 3) set up convention mapping for default sources (allows user to not have to specify)
                         antlrTask.setSource(antlrDirectoryDelegate.getAntlr());
 
-                        // 4) set up convention mapping for handling the 'antlr' dependency configuration
-                        antlrTask.getConventionMapping().map("antlrClasspath", new Callable<Object>() {
-                            public Object call() throws Exception {
-                                return project.getConfigurations().getByName(ANTLR_CONFIGURATION_NAME).copy()
-                                        .setTransitive(true);
-                            }
-                        });
-
-                        // 5) Set up the Antlr output directory (adding to javac inputs!)
+                        // 4) Set up the Antlr output directory (adding to javac inputs!)
                         final String outputDirectoryName = String.format("%s/generated-src/antlr/%s",
                                 project.getBuildDir(), sourceSet.getName());
                         final File outputDirectory = new File(outputDirectoryName);

@@ -16,21 +16,16 @@
 
 package org.gradle.plugins.ide.internal.tooling.idea;
 
-import org.gradle.tooling.model.DomainObjectSet;
-import org.gradle.tooling.model.idea.IdeaContentRoot;
-import org.gradle.tooling.model.idea.IdeaSourceDirectory;
-import org.gradle.tooling.model.internal.ImmutableDomainObjectSet;
-
 import java.io.File;
 import java.io.Serializable;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-public class DefaultIdeaContentRoot implements IdeaContentRoot, Serializable {
+public class DefaultIdeaContentRoot implements Serializable {
 
     File rootDirectory;
-    Set<IdeaSourceDirectory> sourceDirectories = new LinkedHashSet<IdeaSourceDirectory>();
-    Set<IdeaSourceDirectory> testDirectories = new LinkedHashSet<IdeaSourceDirectory>();
+    Set<DefaultIdeaSourceDirectory> sourceDirectories = new LinkedHashSet<DefaultIdeaSourceDirectory>();
+    Set<DefaultIdeaSourceDirectory> testDirectories = new LinkedHashSet<DefaultIdeaSourceDirectory>();
     Set<File> excludeDirectories = new LinkedHashSet<File>();
 
     public File getRootDirectory() {
@@ -42,22 +37,40 @@ public class DefaultIdeaContentRoot implements IdeaContentRoot, Serializable {
         return this;
     }
 
-    public DomainObjectSet<IdeaSourceDirectory> getSourceDirectories() {
-        return new ImmutableDomainObjectSet<IdeaSourceDirectory>(sourceDirectories);
+    public Set<DefaultIdeaSourceDirectory> getSourceDirectories() {
+        return sourceDirectories;
     }
 
-    public DefaultIdeaContentRoot setSourceDirectories(Set<IdeaSourceDirectory> sourceDirectories) {
+    public DefaultIdeaContentRoot setSourceDirectories(Set<DefaultIdeaSourceDirectory> sourceDirectories) {
         this.sourceDirectories = sourceDirectories;
         return this;
     }
 
-    public DomainObjectSet<IdeaSourceDirectory> getTestDirectories() {
-        return new ImmutableDomainObjectSet<IdeaSourceDirectory>(testDirectories);
+    public Set<DefaultIdeaSourceDirectory> getGeneratedSourceDirectories() {
+        return generated(sourceDirectories);
     }
 
-    public DefaultIdeaContentRoot setTestDirectories(Set<IdeaSourceDirectory> testDirectories) {
+    private Set<DefaultIdeaSourceDirectory> generated(Set<DefaultIdeaSourceDirectory> directories) {
+        Set<DefaultIdeaSourceDirectory> generated = new LinkedHashSet<DefaultIdeaSourceDirectory>();
+        for (DefaultIdeaSourceDirectory sourceDirectory : directories) {
+            if (sourceDirectory.isGenerated()) {
+                generated.add(sourceDirectory);
+            }
+        }
+        return generated;
+    }
+
+    public Set<DefaultIdeaSourceDirectory> getTestDirectories() {
+        return testDirectories;
+    }
+
+    public DefaultIdeaContentRoot setTestDirectories(Set<DefaultIdeaSourceDirectory> testDirectories) {
         this.testDirectories = testDirectories;
         return this;
+    }
+
+    public Set<DefaultIdeaSourceDirectory> getGeneratedTestDirectories() {
+        return generated(testDirectories);
     }
 
     public Set<File> getExcludeDirectories() {

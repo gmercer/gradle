@@ -24,8 +24,8 @@ import org.gradle.cache.internal.FileLockManager;
 import org.gradle.cache.internal.OnDemandFileAccess;
 import org.gradle.cache.internal.SimpleStateCache;
 import org.gradle.launcher.daemon.context.DaemonContext;
-import org.gradle.messaging.remote.Address;
-import org.gradle.messaging.serialize.DefaultSerializer;
+import org.gradle.internal.remote.Address;
+import org.gradle.internal.serialize.DefaultSerializer;
 
 import java.io.File;
 import java.util.LinkedList;

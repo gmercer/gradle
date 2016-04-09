@@ -16,22 +16,26 @@
 package org.gradle.api.internal.tasks
 
 import org.gradle.api.file.FileCollection
-import org.gradle.api.file.FileTree
 import org.gradle.api.internal.TaskInternal
 import org.gradle.api.internal.file.FileResolver
+import org.gradle.api.internal.file.FileTreeInternal
+import org.gradle.util.UsesNativeServices
 import spock.lang.Specification
 
 import java.util.concurrent.Callable
 
+@UsesNativeServices
 class DefaultTaskInputsTest extends Specification {
     private final File treeFile = new File('tree')
-    private final FileTree tree = [getFiles: { [treeFile] as Set}] as FileTree
+    private final tree = [getFiles: { [treeFile] as Set}] as FileTreeInternal
     private final FileResolver resolver = [
             resolve: {new File(it)},
             resolveFilesAsTree: {tree}
     ] as FileResolver
 
-    private TaskStatusNagger taskStatusNagger = Mock()
+    private TaskMutator taskStatusNagger = Stub() {
+        mutate(_, _) >> { String method, Runnable action -> action.run() }
+    }
     private final DefaultTaskInputs inputs = new DefaultTaskInputs(resolver, {} as TaskInternal, taskStatusNagger)
 
     def defaultValues() {
@@ -194,58 +198,5 @@ class DefaultTaskInputsTest extends Specification {
         then:
         inputs.hasInputs
         inputs.hasSourceFiles
-    }
-
-    public void callsTaskStatusNaggerWhenFileMethodCalled() {
-        when:
-        inputs.file("aFile")
-        then:
-        1 * taskStatusNagger.nagIfTaskNotInConfigurableState("TaskInputs.file(Object)")
-    }
-
-    public void callsTaskStatusNaggerWhenFilesMethodCalled() {
-        when:
-        inputs.files("aFile", "bFile")
-        then:
-        1 * taskStatusNagger.nagIfTaskNotInConfigurableState("TaskInputs.files(Object...)")
-    }
-
-    public void callsTaskStatusNaggerWhenDirMethodCalled() {
-        when:
-        inputs.dir("aFile")
-        then:
-        1 * taskStatusNagger.nagIfTaskNotInConfigurableState("TaskInputs.dir(Object)")
-    }
-
-    public void callsTaskStatusNaggerWhenSourceDirMethodCalled() {
-        when:
-        inputs.sourceDir("aFile")
-        then:
-        1 * taskStatusNagger.nagIfTaskNotInConfigurableState("TaskInputs.sourceDir(Object)")
-    }
-
-    public void callsTaskStatusNaggerWhenSourceMethodCalled() {
-        when:
-        inputs.source("aFile")
-        then:
-        1 * taskStatusNagger.nagIfTaskNotInConfigurableState("TaskInputs.source(Object)")
-        when:
-        inputs.source("aFile", "bFile")
-        then:
-        1 * taskStatusNagger.nagIfTaskNotInConfigurableState("TaskInputs.source(Object...)")
-    }
-
-    public void callsTaskStatusNaggerWhenPropertyMethodCalled() {
-        when:
-        inputs.property("name", "value")
-        then:
-        1 * taskStatusNagger.nagIfTaskNotInConfigurableState("TaskInputs.property(String, Object)")
-    }
-
-    public void callsTaskStatusNaggerWhenPropertiesMethodCalled() {
-        when:
-        inputs.properties(name:"value")
-        then:
-        1 * taskStatusNagger.nagIfTaskNotInConfigurableState("TaskInputs.properties(Map)")
     }
 }

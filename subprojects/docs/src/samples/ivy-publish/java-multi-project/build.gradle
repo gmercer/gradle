@@ -20,7 +20,7 @@ project(":project1") {
     description = "The first project"
 
     dependencies {
-       compile 'junit:junit:4.11', project(':project2')
+       compile 'junit:junit:4.12', project(':project2')
     }
 }
 
@@ -28,7 +28,7 @@ project(":project2") {
     description = "The second project"
 
     dependencies {
-       compile 'commons-collections:commons-collections:3.1'
+       compile 'commons-collections:commons-collections:3.2.2'
     }
 }
 
@@ -38,7 +38,8 @@ subprojects {
 // END SNIPPET publish-custom-artifact
         repositories {
             ivy {
-                url "${rootProject.buildDir}/repo" // change to point to your repo, e.g. http://my.org/repo
+                // change to point to your repo, e.g. http://my.org/repo
+                url "${rootProject.buildDir}/repo"
             }
         }
 // START SNIPPET publish-custom-artifact

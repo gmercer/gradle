@@ -21,13 +21,13 @@ import org.gradle.api.internal.tasks.options.OptionReader;
 import org.gradle.api.tasks.TaskAction;
 import org.gradle.execution.TaskSelector;
 import org.gradle.initialization.BuildClientMetaData;
-import org.gradle.logging.StyledTextOutput;
-import org.gradle.logging.StyledTextOutputFactory;
+import org.gradle.internal.logging.StyledTextOutput;
+import org.gradle.internal.logging.StyledTextOutputFactory;
 import org.gradle.util.GradleVersion;
 
 import javax.inject.Inject;
 
-import static org.gradle.logging.StyledTextOutput.Style.UserInput;
+import static org.gradle.internal.logging.StyledTextOutput.Style.UserInput;
 
 public class Help extends DefaultTask {
     private String taskPath;
@@ -85,6 +85,10 @@ public class Help extends DefaultTask {
         output.println();
         output.text("To see a list of command-line options, run ");
         metaData.describeCommand(output.withStyle(UserInput), "--help");
+        output.println();
+        output.println();
+        output.text("To see more detail about a task, run ");
+        metaData.describeCommand(output.withStyle(UserInput), "help --task <task>");
         output.println();
     }
 

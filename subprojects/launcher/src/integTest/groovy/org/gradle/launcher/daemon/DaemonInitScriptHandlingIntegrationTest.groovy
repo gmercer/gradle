@@ -18,6 +18,7 @@
 
 package org.gradle.launcher.daemon
 
+import org.gradle.integtests.fixtures.daemon.DaemonIntegrationSpec
 import org.gradle.integtests.fixtures.executer.DaemonGradleExecuter
 import org.gradle.integtests.fixtures.executer.DefaultGradleDistribution
 import org.gradle.internal.os.OperatingSystem
@@ -27,7 +28,7 @@ import spock.lang.Issue
 /**
  * Tests that init scripts are used from the _clients_ GRADLE_HOME, not the daemon server's.
  */
-@Issue("http://issues.gradle.org/browse/GRADLE-2408")
+@Issue("https://issues.gradle.org/browse/GRADLE-2408")
 class DaemonInitScriptHandlingIntegrationTest extends DaemonIntegrationSpec {
 
     TestFile createDistribution(int i) {

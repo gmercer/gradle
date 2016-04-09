@@ -15,7 +15,6 @@
  */
 package org.gradle.cache.internal
 
-import org.gradle.CacheUsage
 import org.gradle.api.Action
 import org.gradle.cache.CacheValidator
 import org.gradle.cache.internal.locklistener.NoOpFileLockContentionHandler
@@ -50,10 +49,6 @@ class DefaultCacheFactoryTest extends Specification {
         _ * metaDataProvider.processDisplayName >> 'process'
     }
 
-    def cleanup() {
-        factory.close()
-    }
-
     public void "creates directory backed store instance"() {
         when:
         def cache = factory.openStore(tmpDir.testDirectory, "<display>", mode(Shared), null)
@@ -62,22 +57,28 @@ class DefaultCacheFactoryTest extends Specification {
         cache.reference.cache instanceof DefaultPersistentDirectoryStore
         cache.baseDir == tmpDir.testDirectory
         cache.toString().startsWith "<display>"
+
+        cleanup:
+        factory.close()
     }
 
     public void "creates directory backed cache instance"() {
         when:
-        def cache = factory.open(tmpDir.testDirectory, "<display>", CacheUsage.ON, null, [prop: 'value'], mode(Shared), null)
+        def cache = factory.open(tmpDir.testDirectory, "<display>", null, [prop: 'value'], mode(Shared), null)
 
         then:
         cache.reference.cache instanceof DefaultPersistentDirectoryCache
         cache.baseDir == tmpDir.testDirectory
         cache.toString().startsWith "<display>"
+
+        cleanup:
+        factory.close()
     }
 
     public void "reuses directory backed cache instances"() {
         when:
-        def ref1 = factory.open(tmpDir.testDirectory, null, CacheUsage.ON, null, [prop: 'value'], mode(Exclusive), null)
-        def ref2 = factory.open(tmpDir.testDirectory, null, CacheUsage.ON, null, [prop: 'value'], mode(Exclusive), null)
+        def ref1 = factory.open(tmpDir.testDirectory, null, null, [prop: 'value'], mode(Exclusive), null)
+        def ref2 = factory.open(tmpDir.testDirectory, null, null, [prop: 'value'], mode(Exclusive), null)
 
         then:
         ref1.reference.cache.is(ref2.reference.cache)
@@ -85,6 +86,9 @@ class DefaultCacheFactoryTest extends Specification {
         and:
         1 * opened.execute(_)
         0 * opened._
+
+        cleanup:
+        factory.close()
     }
 
     public void "reuses directory backed store instances"() {
@@ -98,13 +102,16 @@ class DefaultCacheFactoryTest extends Specification {
         and:
         1 * opened.execute(_)
         0 * opened._
+
+        cleanup:
+        factory.close()
     }
 
     public void "closes cache instance when factory is closed"() {
         def implementation
 
         when:
-        factory.open(tmpDir.testDirectory, null, CacheUsage.ON, null, [prop: 'value'], mode(Exclusive), null)
+        factory.open(tmpDir.testDirectory, null, null, [prop: 'value'], mode(Exclusive), null)
 
         then:
         1 * opened.execute(_) >> { DefaultPersistentDirectoryStore s -> implementation = s }
@@ -122,8 +129,8 @@ class DefaultCacheFactoryTest extends Specification {
         def implementation
 
         when:
-        def cache1 = factory.open(tmpDir.testDirectory, null, CacheUsage.ON, null, [prop: 'value'], mode(Exclusive), null)
-        def cache2 = factory.open(tmpDir.testDirectory, null, CacheUsage.ON, null, [prop: 'value'], mode(Exclusive), null)
+        def cache1 = factory.open(tmpDir.testDirectory, null, null, [prop: 'value'], mode(Exclusive), null)
+        def cache2 = factory.open(tmpDir.testDirectory, null, null, [prop: 'value'], mode(Exclusive), null)
 
         then:
         1 * opened.execute(_) >> { DefaultPersistentDirectoryStore s -> implementation = s }
@@ -147,7 +154,7 @@ class DefaultCacheFactoryTest extends Specification {
         def implementation
 
         when:
-        def cache = factory.open(tmpDir.testDirectory, null, CacheUsage.ON, null, [prop: 'value'], mode(Exclusive), null)
+        def cache = factory.open(tmpDir.testDirectory, null, null, [prop: 'value'], mode(Exclusive), null)
 
         then:
         1 * opened.execute(_) >> { DefaultPersistentDirectoryStore s -> implementation = s }
@@ -166,7 +173,7 @@ class DefaultCacheFactoryTest extends Specification {
         def implementation
 
         when:
-        def cache = factory.open(tmpDir.testDirectory, null, CacheUsage.ON, null, [prop: 'value'], mode(Exclusive), null)
+        def cache = factory.open(tmpDir.testDirectory, null, null, [prop: 'value'], mode(Exclusive), null)
 
         then:
         1 * opened.execute(_) >> { DefaultPersistentDirectoryStore s -> implementation = s }
@@ -183,61 +190,32 @@ class DefaultCacheFactoryTest extends Specification {
 
     public void "fails when directory cache is already open with different properties"() {
         given:
-        factory.open(tmpDir.testDirectory, null, CacheUsage.ON, null, [prop: 'value'], mode(Exclusive), null)
+        factory.open(tmpDir.testDirectory, null, null, [prop: 'value'], mode(Exclusive), null)
 
         when:
-        factory.open(tmpDir.testDirectory, null, CacheUsage.ON, null, [prop: 'other'], mode(Exclusive), null)
+        factory.open(tmpDir.testDirectory, null, null, [prop: 'other'], mode(Exclusive), null)
 
         then:
         IllegalStateException e = thrown()
         e.message == "Cache '${tmpDir.testDirectory}' is already open with different state."
-    }
 
-    public void "fails when directory cache is already open when rebuild is requested"() {
-        given:
-        factory.open(tmpDir.testDirectory, null, CacheUsage.ON, null, [prop: 'value'], mode(Exclusive), null)
-
-        when:
-        factory.open(tmpDir.testDirectory, null, CacheUsage.REBUILD, null, [prop: 'value'], mode(Exclusive), null)
-
-        then:
-        IllegalStateException e = thrown()
-        e.message == "Cannot rebuild cache '${tmpDir.testDirectory}' as it is already open."
-    }
-
-    public void "can open directory cache when rebuild is requested and cache was rebuilt in same session"() {
-        given:
-        factory.open(tmpDir.testDirectory, null, CacheUsage.REBUILD, null, [prop: 'value'], mode(Exclusive), null)
-
-        when:
-        factory.open(tmpDir.testDirectory, null, CacheUsage.REBUILD, null, [prop: 'value'], mode(Exclusive), null)
-
-        then:
-        notThrown(RuntimeException)
-    }
-
-    public void "can open directory cache when rebuild is requested and has been closed"() {
-        given:
-        def cache = factory.open(tmpDir.testDirectory, null, CacheUsage.REBUILD, null, [prop: 'value'], mode(Exclusive), null)
-        cache.close()
-
-        when:
-        factory.open(tmpDir.testDirectory, null, CacheUsage.REBUILD, null, [prop: 'value'], mode(Exclusive), null)
-
-        then:
-        notThrown(RuntimeException)
+        cleanup:
+        factory.close()
     }
 
     public void "fails when directory cache when cache is already open with different lock mode"() {
         given:
-        factory.open(tmpDir.testDirectory, null, CacheUsage.ON, null, [prop: 'value'], mode(Shared), null)
+        factory.open(tmpDir.testDirectory, null, null, [prop: 'value'], mode(Shared), null)
 
         when:
-        factory.open(tmpDir.testDirectory, null, CacheUsage.ON, null, [prop: 'other'], mode(Exclusive), null)
+        factory.open(tmpDir.testDirectory, null, null, [prop: 'other'], mode(Exclusive), null)
 
         then:
         IllegalStateException e = thrown()
         e.message == "Cache '${tmpDir.testDirectory}' is already open with different options."
+
+        cleanup:
+        factory.close()
     }
 
     public void "can pass CacheValidator to Cache"() {
@@ -245,10 +223,13 @@ class DefaultCacheFactoryTest extends Specification {
         CacheValidator validator = Mock()
 
         when:
-        def cache = factory.open(tmpDir.testDirectory, null, CacheUsage.ON, validator, [prop: 'value'], mode(Shared), null)
+        def cache = factory.open(tmpDir.testDirectory, null, validator, [prop: 'value'], mode(Shared), null)
 
         then:
         validator.isValid() >>> [false, true]
         cache != null
+
+        cleanup:
+        factory.close()
     }
 }

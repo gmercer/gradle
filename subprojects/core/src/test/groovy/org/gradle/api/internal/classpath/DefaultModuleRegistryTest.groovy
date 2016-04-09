@@ -15,13 +15,17 @@
  */
 package org.gradle.api.internal.classpath
 
+import org.gradle.internal.classpath.ClassPath
+import org.gradle.internal.classpath.DefaultClassPath
+import org.gradle.internal.installation.GradleInstallation
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.junit.Rule
 import spock.lang.Specification
 
 class DefaultModuleRegistryTest extends Specification {
-    @Rule final TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
+    @Rule
+    final TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
     TestFile runtimeDep
     TestFile resourcesDir
     TestFile jarFile
@@ -32,9 +36,10 @@ class DefaultModuleRegistryTest extends Specification {
 
         distDir.createDir("lib")
         distDir.createDir("lib/plugins")
+        distDir.createDir("lib/plugins/sonar")
         runtimeDep = distDir.createZip("lib/dep-1.2.jar")
 
-        resourcesDir = tmpDir.createDir("classes")
+        resourcesDir = tmpDir.createDir("some-module/build/resources/main")
         def properties = new Properties()
         properties.runtime = 'dep-1.2.jar'
         properties.projects = ''
@@ -44,10 +49,10 @@ class DefaultModuleRegistryTest extends Specification {
         resourcesDir.zipTo(jarFile)
     }
 
-    def "uses manifest from jar in distribution image"() {
+    def "locates module using jar in distribution image"() {
         given:
         def cl = new URLClassLoader([] as URL[])
-        def registry = new DefaultModuleRegistry(cl, distDir)
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, new GradleInstallation(distDir))
 
         expect:
         def module = registry.getModule("gradle-some-module")
@@ -55,55 +60,99 @@ class DefaultModuleRegistryTest extends Specification {
         module.runtimeClasspath.asFiles == [runtimeDep]
     }
 
-    def "uses manifest from classpath when run from IDEA"() {
+    def "locates module using jar from runtime ClassLoader"() {
+        given:
+        def cl = new URLClassLoader([jarFile, runtimeDep].collect { it.toURI().toURL() } as URL[])
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, null)
+
+        expect:
+        def module = registry.getModule("gradle-some-module")
+        module.implementationClasspath.asFiles == [jarFile]
+        module.runtimeClasspath.asFiles == [runtimeDep]
+    }
+
+    def "locates module using manifest from runtime ClassLoader when run from IDEA"() {
         given:
         def classesDir = tmpDir.createDir("out/production/someModule")
         def staticResourcesDir = tmpDir.createDir("some-module/src/main/resources")
         def ignoredDir = tmpDir.createDir("ignore-me-out/production/someModule")
         def cl = new URLClassLoader([ignoredDir, classesDir, resourcesDir, staticResourcesDir, runtimeDep].collect { it.toURI().toURL() } as URL[])
-        def registry = new DefaultModuleRegistry(cl, null)
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, null)
 
         expect:
         def module = registry.getModule("gradle-some-module")
-        module.implementationClasspath.asFiles == [classesDir, staticResourcesDir, resourcesDir]
+        module.implementationClasspath.asFiles == [classesDir, resourcesDir, staticResourcesDir]
         module.runtimeClasspath.asFiles == [runtimeDep]
     }
 
-    def "uses manifest from classpath when run from Eclipse"() {
+    def "locates module using manifest from runtime ClassLoader when run from Eclipse"() {
         given:
         def classesDir = tmpDir.createDir("some-module/bin")
         def staticResourcesDir = tmpDir.createDir("some-module/src/main/resources")
         def cl = new URLClassLoader([classesDir, resourcesDir, staticResourcesDir, runtimeDep].collect { it.toURI().toURL() } as URL[])
-        def registry = new DefaultModuleRegistry(cl, null)
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, null)
 
         expect:
         def module = registry.getModule("gradle-some-module")
-        module.implementationClasspath.asFiles == [classesDir, staticResourcesDir, resourcesDir]
+        module.implementationClasspath.asFiles == [classesDir, resourcesDir, staticResourcesDir]
         module.runtimeClasspath.asFiles == [runtimeDep]
     }
 
-    def "uses manifest from classpath when run from build"() {
+    def "locates module using manifest from runtime ClassLoader when run from build"() {
         given:
         def classesDir = tmpDir.createDir("some-module/build/classes/main")
-        def staticResourcesDir = tmpDir.createDir("some-module/build/resources/main")
+        def staticResourcesDir = tmpDir.createDir("some-module/src/main/resources")
         def cl = new URLClassLoader([classesDir, resourcesDir, staticResourcesDir, runtimeDep].collect { it.toURI().toURL() } as URL[])
-        def registry = new DefaultModuleRegistry(cl, null)
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, null)
 
         expect:
         def module = registry.getModule("gradle-some-module")
-        module.implementationClasspath.asFiles == [classesDir, staticResourcesDir, resourcesDir]
+        module.implementationClasspath.asFiles == [classesDir, resourcesDir, staticResourcesDir]
         module.runtimeClasspath.asFiles == [runtimeDep]
     }
 
-    def "uses manifest from a jar on the classpath"() {
+    def "locates module using jar from additional classpath"() {
         given:
-        def cl = new URLClassLoader([jarFile, runtimeDep].collect { it.toURI().toURL() } as URL[])
-        def registry = new DefaultModuleRegistry(cl, distDir)
+        def registry = new DefaultModuleRegistry(new DefaultClassPath([jarFile, runtimeDep]), null)
 
         expect:
         def module = registry.getModule("gradle-some-module")
         module.implementationClasspath.asFiles == [jarFile]
         module.runtimeClasspath.asFiles == [runtimeDep]
+    }
+
+    def "locates module using manifest from additional classpath when run from IDEA"() {
+        given:
+        def classesDir = tmpDir.createDir("out/production/someModule")
+        def staticResourcesDir = tmpDir.createDir("some-module/src/main/resources")
+        def ignoredDir = tmpDir.createDir("ignore-me-out/production/someModule")
+        def registry = new DefaultModuleRegistry(new DefaultClassPath([ignoredDir, classesDir, resourcesDir, staticResourcesDir, runtimeDep]), null)
+
+        expect:
+        def module = registry.getModule("gradle-some-module")
+        module.implementationClasspath.asFiles == [classesDir, resourcesDir, staticResourcesDir]
+        module.runtimeClasspath.asFiles == [runtimeDep]
+    }
+
+    def "requires no additional module classpath when run from distribution"() {
+        given:
+        def cl = new URLClassLoader([] as URL[])
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, new GradleInstallation(distDir))
+
+        expect:
+        registry.additionalClassPath.empty
+    }
+
+    def "requires additional module classpath when no distribution available"() {
+        given:
+        def classesDir = tmpDir.createDir("out/production/someModule")
+        def staticResourcesDir = tmpDir.createDir("some-module/src/main/resources")
+        def ignoredDir = tmpDir.createDir("ignore-me-out/production/someModule")
+        def cl = new URLClassLoader([ignoredDir, classesDir, resourcesDir, staticResourcesDir, runtimeDep].collect { it.toURI().toURL() } as URL[])
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, null)
+
+        expect:
+        registry.additionalClassPath.asFiles.containsAll([classesDir, staticResourcesDir, resourcesDir])
     }
 
     def "handles empty classpaths in manifest"() {
@@ -114,7 +163,7 @@ class DefaultModuleRegistryTest extends Specification {
         resourcesDir.file("gradle-some-module-classpath.properties").withOutputStream { outstr -> properties.save(outstr, "header") }
 
         def cl = new URLClassLoader([resourcesDir, runtimeDep].collect { it.toURI().toURL() } as URL[])
-        def registry = new DefaultModuleRegistry(cl, null)
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, null)
 
         expect:
         def module = registry.getModule("gradle-some-module")
@@ -126,13 +175,15 @@ class DefaultModuleRegistryTest extends Specification {
         given:
         def properties = new Properties()
         properties.projects = 'gradle-module-2'
-        resourcesDir.file("gradle-some-module-classpath.properties").withOutputStream { outstr -> properties.save(outstr, "header") }
+        def module1Dir = tmpDir.createDir("some-module/build/resources/main")
+        module1Dir.file("gradle-some-module-classpath.properties").withOutputStream { outstr -> properties.save(outstr, "header") }
 
         properties = new Properties()
-        resourcesDir.file("gradle-module-2-classpath.properties").withOutputStream { outstr -> properties.save(outstr, "header") }
+        def module2Dir = tmpDir.createDir("module-2/build/resources/main")
+        module2Dir.file("gradle-module-2-classpath.properties").withOutputStream { outstr -> properties.save(outstr, "header") }
 
-        def cl = new URLClassLoader([resourcesDir].collect { it.toURI().toURL() } as URL[])
-        def registry = new DefaultModuleRegistry(cl, null)
+        def cl = new URLClassLoader([module1Dir, module2Dir].collect { it.toURI().toURL() } as URL[])
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, null)
 
         expect:
         def module = registry.getModule("gradle-some-module")
@@ -143,18 +194,21 @@ class DefaultModuleRegistryTest extends Specification {
         given:
         def properties = new Properties()
         properties.projects = 'gradle-module-2'
-        resourcesDir.file("gradle-some-module-classpath.properties").withOutputStream { outstr -> properties.save(outstr, "header") }
+        def module1Dir = tmpDir.createDir("some-module/build/resources/main")
+        module1Dir.file("gradle-some-module-classpath.properties").withOutputStream { outstr -> properties.save(outstr, "header") }
 
         properties = new Properties()
         properties.projects = 'gradle-module-3'
-        resourcesDir.file("gradle-module-2-classpath.properties").withOutputStream { outstr -> properties.save(outstr, "header") }
+        def module2Dir = tmpDir.createDir("module-2/build/resources/main")
+        module2Dir.file("gradle-module-2-classpath.properties").withOutputStream { outstr -> properties.save(outstr, "header") }
 
         properties = new Properties()
         properties.projects = ''
-        resourcesDir.file("gradle-module-3-classpath.properties").withOutputStream { outstr -> properties.save(outstr, "header") }
+        def module3Dir = tmpDir.createDir("module-3/build/resources/main")
+        module3Dir.file("gradle-module-3-classpath.properties").withOutputStream { outstr -> properties.save(outstr, "header") }
 
-        def cl = new URLClassLoader([resourcesDir].collect { it.toURI().toURL() } as URL[])
-        def registry = new DefaultModuleRegistry(cl, null)
+        def cl = new URLClassLoader([module1Dir, module2Dir, module3Dir].collect { it.toURI().toURL() } as URL[])
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, null)
 
         expect:
         def module = registry.getModule("gradle-some-module")
@@ -164,20 +218,20 @@ class DefaultModuleRegistryTest extends Specification {
     def "fails when classpath does not contain manifest resource"() {
         given:
         def cl = new URLClassLoader([] as URL[])
-        def registry = new DefaultModuleRegistry(cl, null)
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, null)
 
         when:
         registry.getModule("gradle-some-module")
 
         then:
         UnknownModuleException e = thrown()
-        e.message == "Cannot locate classpath manifest for module 'gradle-some-module' in classpath."
+        e.message == "Cannot locate manifest for module 'gradle-some-module' in classpath."
     }
 
     def "fails when classpath and distribution image do not contain manifest"() {
         given:
         def cl = new URLClassLoader([] as URL[])
-        def registry = new DefaultModuleRegistry(cl, distDir)
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, new GradleInstallation(distDir))
 
         when:
         registry.getModule("gradle-other-module")
@@ -190,7 +244,7 @@ class DefaultModuleRegistryTest extends Specification {
     def "locates an external module as a JAR on the classpath"() {
         given:
         def cl = new URLClassLoader([runtimeDep].collect { it.toURI().toURL() } as URL[])
-        def registry = new DefaultModuleRegistry(cl, distDir)
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, new GradleInstallation(distDir))
 
         expect:
         def module = registry.getExternalModule("dep")
@@ -201,7 +255,7 @@ class DefaultModuleRegistryTest extends Specification {
     def "locates an external module as a JAR in the distribution image when not available on the classpath"() {
         given:
         def cl = new URLClassLoader([] as URL[])
-        def registry = new DefaultModuleRegistry(cl, distDir)
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, new GradleInstallation(distDir))
 
         expect:
         def module = registry.getExternalModule("dep")
@@ -212,7 +266,7 @@ class DefaultModuleRegistryTest extends Specification {
     def "fails when external module cannot be found"() {
         given:
         def cl = new URLClassLoader([] as URL[])
-        def registry = new DefaultModuleRegistry(cl, distDir)
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, new GradleInstallation(distDir))
 
         when:
         registry.getExternalModule("unknown")
@@ -227,11 +281,25 @@ class DefaultModuleRegistryTest extends Specification {
         distDir.createFile("dep-launcher-1.2.jar")
         distDir.createFile("dep-launcher-1.2-beta-3.jar")
         def cl = new URLClassLoader([] as URL[])
-        def registry = new DefaultModuleRegistry(cl, distDir)
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, new GradleInstallation(distDir))
 
         expect:
         def module = registry.getExternalModule("dep")
         module.implementationClasspath.asFiles == [runtimeDep]
+        module.runtimeClasspath.empty
+    }
+
+    def "also looks in subdirectories of plugins directory when searching for external modules"() {
+        given:
+        def cl = new URLClassLoader([] as URL[])
+        def registry = new DefaultModuleRegistry(cl, ClassPath.EMPTY, new GradleInstallation(distDir))
+
+        when:
+        def sonarDependency = distDir.createZip("lib/plugins/sonar/sonar-dependency-1.2.jar")
+
+        then:
+        def module = registry.getExternalModule("sonar-dependency")
+        module.implementationClasspath.asFiles == [sonarDependency]
         module.runtimeClasspath.empty
     }
 }

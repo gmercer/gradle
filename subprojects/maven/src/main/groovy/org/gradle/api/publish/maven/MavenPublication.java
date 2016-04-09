@@ -19,8 +19,8 @@ package org.gradle.api.publish.maven;
 import org.gradle.api.Action;
 import org.gradle.api.Incubating;
 import org.gradle.api.component.SoftwareComponent;
-import org.gradle.internal.HasInternalProtocol;
 import org.gradle.api.publish.Publication;
+import org.gradle.internal.HasInternalProtocol;
 
 /**
  * A {@code MavenPublication} is the representation/configuration of how Gradle should publish something in Maven format.
@@ -61,15 +61,14 @@ import org.gradle.api.publish.Publication;
  *
  * task sourceJar(type: Jar) {
  *   from sourceSets.main.allJava
+ *   classifier "sources"
  * }
  *
  * publishing {
  *   publications {
  *     myPublication(MavenPublication) {
  *       from components.java
- *       artifact sourceJar {
- *         classifier "source"
- *       }
+ *       artifact sourceJar
  *       pom.withXml {
  *         asNode().appendNode('description', 'A demonstration of Maven POM customization')
  *       }
@@ -147,7 +146,7 @@ public interface MavenPublication extends Publication {
      * apply plugin: "maven-publish"
      *
      * task sourceJar(type: Jar) {
-     *   classifier "source"
+     *   classifier "sources"
      * }
      *
      * publishing {
@@ -176,13 +175,13 @@ public interface MavenPublication extends Publication {
      * apply plugin: "maven-publish"
      *
      * task sourceJar(type: Jar) {
-     *   classifier "source"
+     *   classifier "sources"
      * }
      *
      * publishing {
      *   publications {
      *     maven(MavenPublication) {
-     *       artifact sourceJar {
+     *       artifact(sourceJar) {
      *         // These values will be used instead of the values from the task. The task values will not be updated.
      *         classifier "src"
      *         extension "zip"
@@ -211,7 +210,7 @@ public interface MavenPublication extends Publication {
      * apply plugin: "maven-publish"
      *
      * task sourceJar(type: Jar) {
-     *   classifier "source"
+     *   classifier "sources"
      * }
 
      * publishing {

@@ -20,36 +20,38 @@ import org.gradle.internal.id.CompositeIdGenerator;
 import org.gradle.internal.id.IdGenerator;
 import org.gradle.internal.id.LongIdGenerator;
 import org.gradle.internal.id.UUIDGenerator;
-import org.gradle.internal.nativeplatform.ProcessEnvironment;
-import org.gradle.internal.nativeplatform.services.NativeServices;
+import org.gradle.internal.nativeintegration.ProcessEnvironment;
 import org.gradle.internal.service.DefaultServiceRegistry;
 import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.launcher.daemon.context.DaemonCompatibilitySpec;
 import org.gradle.launcher.daemon.context.DaemonContext;
 import org.gradle.launcher.daemon.context.DaemonContextBuilder;
 import org.gradle.launcher.daemon.registry.DaemonRegistry;
-import org.gradle.logging.internal.OutputEventListener;
-import org.gradle.messaging.remote.internal.OutgoingConnector;
-import org.gradle.messaging.remote.internal.inet.TcpOutgoingConnector;
+import org.gradle.internal.logging.internal.OutputEventListener;
+import org.gradle.internal.remote.internal.OutgoingConnector;
+import org.gradle.internal.remote.internal.inet.TcpOutgoingConnector;
 
 import java.io.InputStream;
 
 /**
  * Some support wiring for daemon clients.
- * 
+ *
  * @see DaemonClientServices
- * @see EmbeddedDaemonClientServices
  */
-abstract public class DaemonClientServicesSupport extends DefaultServiceRegistry {
+public abstract class DaemonClientServicesSupport extends DefaultServiceRegistry {
     private final InputStream buildStandardInput;
 
-    public DaemonClientServicesSupport(ServiceRegistry loggingServices, InputStream buildStandardInput) {
-        super(NativeServices.getInstance(), loggingServices);
+    public DaemonClientServicesSupport(ServiceRegistry parent, InputStream buildStandardInput) {
+        super(parent);
         this.buildStandardInput = buildStandardInput;
     }
 
     protected InputStream getBuildStandardInput() {
         return buildStandardInput;
+    }
+
+    DaemonStopClient createDaemonStopClient(DaemonConnector connector, IdGenerator idGenerator) {
+        return new DaemonStopClient(connector, idGenerator);
     }
 
     protected DaemonClient createDaemonClient() {
@@ -63,26 +65,26 @@ abstract public class DaemonClientServicesSupport extends DefaultServiceRegistry
                 get(IdGenerator.class));
     }
 
-    protected DaemonContext createDaemonContext() {
-        DaemonContextBuilder builder = new DaemonContextBuilder(get(ProcessEnvironment.class));
+    DaemonContext createDaemonContext(ProcessEnvironment processEnvironment) {
+        DaemonContextBuilder builder = new DaemonContextBuilder(processEnvironment);
         configureDaemonContextBuilder(builder);
         return builder.create();
     }
 
     // subclass hook, allowing us to fake the context for testing
     protected void configureDaemonContextBuilder(DaemonContextBuilder builder) {
-        
+
     }
 
-    protected IdGenerator<?> createIdGenerator() {
+    IdGenerator<?> createIdGenerator() {
         return new CompositeIdGenerator(new UUIDGenerator().generateId(), new LongIdGenerator());
     }
 
-    protected OutgoingConnector createOutgoingConnector() {
+    OutgoingConnector createOutgoingConnector() {
         return new TcpOutgoingConnector();
     }
 
-    protected DaemonConnector createDaemonConnector() {
-        return new DefaultDaemonConnector(get(DaemonRegistry.class), get(OutgoingConnector.class), get(DaemonStarter.class));
+    DaemonConnector createDaemonConnector(DaemonRegistry daemonRegistry, OutgoingConnector outgoingConnector, DaemonStarter daemonStarter) {
+        return new DefaultDaemonConnector(daemonRegistry, outgoingConnector, daemonStarter);
     }
 }

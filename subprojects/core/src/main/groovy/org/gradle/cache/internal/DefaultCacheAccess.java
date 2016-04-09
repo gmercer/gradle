@@ -27,7 +27,7 @@ import org.gradle.internal.Factories;
 import org.gradle.internal.Factory;
 import org.gradle.internal.UncheckedException;
 import org.gradle.internal.concurrent.CompositeStoppable;
-import org.gradle.messaging.serialize.Serializer;
+import org.gradle.internal.serialize.Serializer;
 
 import java.io.File;
 import java.util.HashSet;
@@ -40,7 +40,7 @@ import static org.gradle.cache.internal.FileLockManager.LockMode.Exclusive;
 import static org.gradle.cache.internal.FileLockManager.LockMode.Shared;
 
 @ThreadSafe
-public class    DefaultCacheAccess implements CacheCoordinator {
+public class DefaultCacheAccess implements CacheCoordinator {
 
     private final static Logger LOG = Logging.getLogger(DefaultCacheAccess.class);
 
@@ -180,10 +180,15 @@ public class    DefaultCacheAccess implements CacheCoordinator {
             throw new UnsupportedOperationException("Not implemented yet.");
         }
 
-        takeOwnership(operationDisplayName);
         boolean wasStarted = false;
+        lock.lock();
         try {
+            takeOwnership(operationDisplayName);
             wasStarted = onStartWork();
+        } finally {
+            lock.unlock();
+        }
+        try {
             return factory.create();
         } finally {
             lock.lock();

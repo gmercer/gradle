@@ -33,7 +33,6 @@ public class GradleContextualExecuter extends AbstractDelegatingGradleExecuter {
         embedded(false),
         forking(true),
         daemon(true),
-        embeddedDaemon(false),
         parallel(true, true);
 
         final public boolean forks;
@@ -59,6 +58,10 @@ public class GradleContextualExecuter extends AbstractDelegatingGradleExecuter {
 
     public static boolean isDaemon() {
         return getSystemPropertyExecuter() == Executer.daemon;
+    }
+
+    public static boolean isLongLivingProcess() {
+        return isEmbedded() || isDaemon();
     }
 
     public static boolean isParallel() {
@@ -91,14 +94,12 @@ public class GradleContextualExecuter extends AbstractDelegatingGradleExecuter {
         copyTo(gradleExecuter);
 
         if (System.getProperty(UNKNOWN_OS_SYS_PROP) != null) {
-            gradleExecuter.withGradleOpts("-Dos.arch=unknown architecture", "-Dos.name=unknown operating system", "-Dos.version=unknown version");
+            gradleExecuter.withBuildJvmOpts("-Dos.arch=unknown architecture", "-Dos.name=unknown operating system", "-Dos.version=unknown version");
         }
     }
 
     private GradleExecuter createExecuter(Executer executerType) {
         switch (executerType) {
-            case embeddedDaemon:
-                return new EmbeddedDaemonGradleExecuter(getDistribution(), getTestDirectoryProvider());
             case embedded:
                 return new InProcessGradleExecuter(getDistribution(), getTestDirectoryProvider());
             case daemon:

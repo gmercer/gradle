@@ -18,8 +18,9 @@ package org.gradle.api.internal.file.collections;
 import org.gradle.api.file.FileVisitor;
 import org.gradle.api.file.RelativePath;
 import org.gradle.api.internal.file.DefaultFileVisitDetails;
-import org.gradle.internal.nativeplatform.filesystem.FileSystem;
-import org.gradle.internal.nativeplatform.services.FileSystems;
+import org.gradle.api.internal.file.FileSystemSubset;
+import org.gradle.internal.nativeintegration.filesystem.FileSystem;
+import org.gradle.internal.nativeintegration.services.FileSystems;
 
 import java.io.File;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -40,6 +41,16 @@ public class SingletonFileTree implements MinimalFileTree {
     }
 
     public void visit(FileVisitor visitor) {
-        visitor.visitFile(new DefaultFileVisitDetails(file, new RelativePath(true, file.getName()), new AtomicBoolean(), fileSystem, fileSystem));
+        visitor.visitFile(new DefaultFileVisitDetails(file, new RelativePath(true, file.getName()), new AtomicBoolean(), fileSystem, fileSystem, false));
+    }
+
+    @Override
+    public void registerWatchPoints(FileSystemSubset.Builder builder) {
+        builder.add(file);
+    }
+
+    @Override
+    public void visitTreeOrBackingFile(FileVisitor visitor) {
+        visit(visitor);
     }
 }

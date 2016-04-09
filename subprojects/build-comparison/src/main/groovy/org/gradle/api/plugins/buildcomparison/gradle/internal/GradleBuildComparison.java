@@ -20,7 +20,7 @@ import org.gradle.api.Action;
 import org.gradle.api.GradleException;
 import org.gradle.api.Transformer;
 import org.gradle.internal.IoActions;
-import org.gradle.internal.filestore.FileStore;
+import org.gradle.internal.resource.local.FileStore;
 import org.gradle.api.invocation.Gradle;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.plugins.buildcomparison.compare.internal.*;
@@ -31,7 +31,7 @@ import org.gradle.api.plugins.buildcomparison.outcome.internal.CompositeBuildOut
 import org.gradle.api.plugins.buildcomparison.render.internal.*;
 import org.gradle.api.plugins.buildcomparison.render.internal.html.GradleBuildComparisonResultHtmlRenderer;
 import org.gradle.api.plugins.buildcomparison.render.internal.html.HtmlRenderContext;
-import org.gradle.logging.ProgressLogger;
+import org.gradle.internal.logging.ProgressLogger;
 import org.gradle.tooling.GradleConnector;
 import org.gradle.tooling.ProjectConnection;
 import org.gradle.tooling.model.internal.outcomes.ProjectOutcomes;

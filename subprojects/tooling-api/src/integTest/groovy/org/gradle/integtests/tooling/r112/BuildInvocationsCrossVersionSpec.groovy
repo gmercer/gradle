@@ -25,11 +25,7 @@ import org.gradle.tooling.model.*
 import org.gradle.tooling.model.gradle.BuildInvocations
 
 @ToolingApiVersion(">=1.12")
-@TargetGradleVersion(">=1.0-milestone-8")
 class BuildInvocationsCrossVersionSpec extends ToolingApiSpecification {
-    def implicitTaskNames = ['dependencies', 'dependencyInsight', 'help', 'init', 'projects', 'properties', 'tasks', 'wrapper']
-    def nonRootImplicitTaskNames = ['dependencies', 'dependencyInsight', 'help', 'projects', 'properties', 'tasks']
-
     def setup() {
         settingsFile << '''
 include 'a'
@@ -62,7 +58,7 @@ project(':b:c') {
     }
 
     @TargetGradleVersion(">=1.8 <=1.11")
-    def "no task selectors when running action in older container"() {
+    def "cannot fetch task selectors from action in older target version"() {
         when:
         withConnection { connection -> connection.action(new FetchAllTaskSelectorsBuildAction()).run() }
 
@@ -80,16 +76,14 @@ project(':b:c') {
         then:
         result != null
         result.keySet() == ['test', 'a', 'b', 'c'] as Set
-        result['test'] == ['t1', 't2', 't3'] as Set
-        result['b'] == ['t1', 't2', 't3'] as Set
-        result['c'] == ['t1', 't2'] as Set
-        result['a'].isEmpty()
+        result['test'] == rootProjectImplicitSelectors + ['t1', 't2', 't3'] as Set
+        result['b'] == implicitSelectors + ['t1', 't2', 't3'] as Set
+        result['c'] == implicitSelectors + ['t1', 't2'] as Set
+        result['a'] == implicitSelectors
     }
 
     @TargetGradleVersion(">=1.12")
-    def "build task selectors from action"() {
-        given:
-        toolingApi.isEmbedded = false // to load launchables using correct classloader in integTest
+    def "can run build using task selectors from action"() {
         when:
         BuildInvocations projectSelectors = withConnection { connection ->
             connection.action(new FetchTaskSelectorsBuildAction('b')).run() }
@@ -102,10 +96,8 @@ project(':b:c') {
         result.result.assertTasksExecuted(':b:c:t1')
     }
 
-    @TargetGradleVersion(">=1.0-milestone-8")
-    def "build task selectors from connection"() {
+    def "can run build using task selectors from connection"() {
         when:
-        toolingApi.isEmbedded = false // to load launchables using correct classloader in integTest
         BuildInvocations model = withConnection { connection ->
             connection.getModel(BuildInvocations)
         }
@@ -120,10 +112,8 @@ project(':b:c') {
         result.result.assertTasksExecuted(':t1', ':b:c:t1')
     }
 
-    @TargetGradleVersion(">=1.0-milestone-8")
     def "build task selectors from connection in specified order"() {
         when:
-        toolingApi.isEmbedded = false // to load launchables using correct classloader in integTest
         BuildInvocations model = withConnection { connection ->
             connection.getModel(BuildInvocations)
         }
@@ -143,23 +133,18 @@ project(':b:c') {
         result.result.assertTasksExecuted(':b:t2', ':b:c:t2', ':t1', ':b:c:t1')
     }
 
-    @TargetGradleVersion(">=1.0-milestone-8")
-    def "can request task selectors for project"() {
-        given:
+    def "can fetch task selectors for root project from connection"() {
+        when:
         BuildInvocations model = withConnection { connection ->
             connection.getModel(BuildInvocations)
         }
 
-        when:
-        def selectors = model.taskSelectors.findAll { TaskSelector it ->
-            !it.description.startsWith(':') && it.name != 'setupBuild' // synthetic task in 1.6
-        }
         then:
-        selectors*.name as Set == ['t1', 't2', 't3'] as Set
+        model.taskSelectors*.name as Set == rootProjectImplicitSelectors + ['t1', 't2', 't3'] as Set
     }
 
     @TargetGradleVersion("=1.12")
-    def "get tasks for projects"() {
+    def "can fetch tasks for project using action"() {
         when:
         List<Task> tasks = withConnection { connection ->
             connection.action(new FetchTasksBuildAction(':b')).run()
@@ -177,18 +162,22 @@ project(':b:c') {
     }
 
     @TargetGradleVersion(">=2.0")
-    def "get tasks including implicit for projects"() {
+    def "can fetch tasks including implicit for project using action"() {
+        def projectBExpectedTasks = (['t2', 't3'] + implicitTasks) as Set
+        def rootProjectExpectedTasks = (['t1'] + rootProjectImplicitTasks) as Set
+
         when:
         List<Task> tasks = withConnection { connection ->
             connection.action(new FetchTasksBuildAction(':b')).run()
         }
 
         then:
-        tasks.size() == 2 + nonRootImplicitTaskNames.size()
-        tasks*.name as Set == (['t2', 't3'] + nonRootImplicitTaskNames) as Set
+        tasks.size() == projectBExpectedTasks.size()
+        tasks*.name as Set == projectBExpectedTasks
 
         when:
         tasks[0].project
+
         then:
         UnsupportedMethodException e = thrown()
         e != null
@@ -199,8 +188,8 @@ project(':b:c') {
         }
 
         then:
-        tasks.size() == 1 + implicitTaskNames.size()
-        tasks*.name as Set == (['t1'] + implicitTaskNames) as Set
+        tasks.size() == rootProjectExpectedTasks.size()
+        tasks*.name as Set == rootProjectExpectedTasks
 
         when:
         tasks[0].project
@@ -212,7 +201,6 @@ project(':b:c') {
     @TargetGradleVersion(">=1.12")
     def "build tasks from BuildInvocations model as Launchable"() {
         when:
-        toolingApi.isEmbedded = false // to load launchables using correct classloader in integTest
         List<Task> tasks = withConnection { connection ->
             connection.action(new FetchTasksBuildAction(':b')).run()
         }
@@ -223,13 +211,10 @@ project(':b:c') {
 
         then:
         result.result.assertTasksExecuted(':b:t2')
-        result.result.assertTaskNotExecuted(':b:c:t2')
     }
 
-    @TargetGradleVersion(">=1.0-milestone-8")
     def "build task from connection as Launchable"() {
         when:
-        toolingApi.isEmbedded = false // to load launchables using correct classloader in integTest
         BuildInvocations model = withConnection { connection ->
             connection.getModel(BuildInvocations)
         }
@@ -244,10 +229,8 @@ project(':b:c') {
         result.result.assertTasksExecuted(':t1')
     }
 
-    @TargetGradleVersion(">=1.0-milestone-8")
     def "build tasks Launchables in order"() {
         when:
-        toolingApi.isEmbedded = false // to load launchables using correct classloader in integTest
         GradleProject model = withConnection { connection ->
             connection.getModel(GradleProject)
         }
@@ -257,6 +240,7 @@ project(':b:c') {
         def result = withBuild { BuildLauncher it ->
             it.forLaunchables(taskT1, taskBT2, taskBCT1)
         }
+
         then:
         result.result.assertTasksExecuted(':t1', ':b:t2', ':b:c:t1')
 
@@ -271,7 +255,6 @@ project(':b:c') {
     @TargetGradleVersion(">=1.12")
     def "build tasks and selectors in order"() {
         when:
-        toolingApi.isEmbedded = false // to load launchables using correct classloader in integTest
         GradleProject model = withConnection { connection ->
             connection.getModel(GradleProject)
         }
@@ -288,10 +271,8 @@ project(':b:c') {
         result.result.assertTasksExecuted(':b:c:t1', ':b:t3', ':t1')
     }
 
-    @TargetGradleVersion(">=1.0-milestone-8")
     def "build tasks and selectors in order cross version"() {
         when:
-        toolingApi.isEmbedded = false // to load launchables using correct classloader in integTest
         GradleProject model = withConnection { connection ->
             connection.getModel(GradleProject)
         }
@@ -312,7 +293,6 @@ project(':b:c') {
     @TargetGradleVersion("=1.12")
     def "build fails with selectors from different projects"() {
         when:
-        toolingApi.isEmbedded = false // to load launchables using correct classloader in integTest
         BuildInvocations rootSelectors = withConnection { connection ->
             connection.action(new FetchTaskSelectorsBuildAction('test')).run()
         }
@@ -333,7 +313,6 @@ project(':b:c') {
     @TargetGradleVersion(">=2.0")
     def "builds selectors from different projects"() {
         when:
-        toolingApi.isEmbedded = false // to load launchables using correct classloader in integTest
         BuildInvocations rootSelectors = withConnection { connection ->
             connection.action(new FetchTaskSelectorsBuildAction('test')).run()
         }
@@ -359,13 +338,11 @@ project(':b:c') {
             connection.getModel(BuildInvocations)
         }
 
-        expect:
-        model.tasks.count { it.name != 'setupBuild' && !implicitTaskNames.contains(it.name) } == 1
-
         when:
-        def task = model.tasks.find { Task it -> it.name != 'setupBuild' && !implicitTaskNames.contains(it.name) }
+        def task = model.tasks.find { !rootProjectImplicitTasks.contains(it.name) }
 
         then:
+        task != null
         task.name == 't1'
         task.path == ':t1'
 

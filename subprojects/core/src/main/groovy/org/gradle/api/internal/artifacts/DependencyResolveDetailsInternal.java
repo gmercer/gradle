@@ -23,4 +23,7 @@ public interface DependencyResolveDetailsInternal extends DependencyResolveDetai
 
     void useVersion(String version, ComponentSelectionReason selectionReason);
 
+    ComponentSelectionReason getSelectionReason();
+
+    boolean isUpdated();
 }

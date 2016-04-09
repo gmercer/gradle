@@ -19,10 +19,11 @@ package org.gradle.tooling.internal.provider.connection;
 import org.gradle.api.logging.LogLevel;
 import org.gradle.cli.CommandLineParser;
 import org.gradle.cli.ParsedCommandLine;
-import org.gradle.logging.LoggingConfiguration;
-import org.gradle.logging.internal.LoggingCommandLineConverter;
+import org.gradle.internal.logging.LoggingConfiguration;
+import org.gradle.internal.logging.internal.LoggingCommandLineConverter;
 
 import java.util.Collections;
+import java.util.List;
 
 public class BuildLogLevelMixIn {
     private final ProviderOperationParameters parameters;
@@ -35,9 +36,10 @@ public class BuildLogLevelMixIn {
         LoggingCommandLineConverter converter = new LoggingCommandLineConverter();
         CommandLineParser parser = new CommandLineParser().allowUnknownOptions().allowMixedSubcommandsAndOptions();
         converter.configure(parser);
-        ParsedCommandLine parsedCommandLine = parser.parse(parameters.getArguments(Collections.<String>emptyList()));
+        List<String> arguments = parameters.getArguments();
+        ParsedCommandLine parsedCommandLine = parser.parse(arguments == null ? Collections.<String>emptyList() : arguments);
         //configure verbosely only if arguments do not specify any log level.
-        if (parameters.getVerboseLogging(false) && !parsedCommandLine.hasAnyOption(converter.getLogLevelOptions())) {
+        if (parameters.getVerboseLogging() && !parsedCommandLine.hasAnyOption(converter.getLogLevelOptions())) {
             return LogLevel.DEBUG;
         }
 

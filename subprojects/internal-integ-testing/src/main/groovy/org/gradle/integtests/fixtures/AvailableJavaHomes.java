@@ -15,92 +15,111 @@
  */
 package org.gradle.integtests.fixtures;
 
+import com.google.common.base.Function;
+import com.google.common.base.Predicate;
+import com.google.common.collect.FluentIterable;
+import com.google.common.collect.Iterables;
+import net.rubygrapefruit.platform.SystemInfo;
+import net.rubygrapefruit.platform.WindowsRegistry;
+import org.gradle.api.JavaVersion;
+import org.gradle.api.Nullable;
+import org.gradle.api.specs.Spec;
+import org.gradle.api.specs.Specs;
+import org.gradle.integtests.fixtures.jvm.InstalledJvmLocator;
+import org.gradle.integtests.fixtures.jvm.JvmInstallation;
+import org.gradle.internal.SystemProperties;
+import org.gradle.internal.jvm.JavaInfo;
 import org.gradle.internal.jvm.Jre;
 import org.gradle.internal.jvm.Jvm;
+import org.gradle.internal.nativeintegration.filesystem.FileCanonicalizer;
+import org.gradle.internal.nativeintegration.services.NativeServices;
 import org.gradle.internal.os.OperatingSystem;
-import org.gradle.util.GFileUtils;
+import org.gradle.testfixtures.internal.NativeServicesTestFixture;
+import org.gradle.util.CollectionUtils;
 
 import java.io.File;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Allows the tests to get hold of an alternative Java installation when needed.
  */
-abstract public class AvailableJavaHomes {
+public abstract class AvailableJavaHomes {
+    private static List<JvmInstallation> jvms;
 
-    private static File getJavaHome(String label) {
-        String value = System.getenv().get(String.format("JDK_%s", label));
-        return value == null ? null : GFileUtils.canonicalise(new File(value));
+    @Nullable
+    public static JavaInfo getJava5() {
+        return getJdk(JavaVersion.VERSION_1_5);
     }
 
-    /**
-     * Locates a JVM installation that is different to the current JVM.
-     */
-    public static File getBestAlternative() {
-        Jvm jvm = Jvm.current();
+    @Nullable
+    public static JavaInfo getJdk6() {
+        return getJdk(JavaVersion.VERSION_1_6);
+    }
 
-        // Use environment variables
-        File javaHome = null;
-        if (jvm.getJavaVersion().isJava6Compatible()) {
-            javaHome = firstAvailable("15", "17");
-        } else if (jvm.getJavaVersion().isJava5Compatible()) {
-            javaHome = firstAvailable("16", "17");
-        }
-        if (javaHome != null) {
-            return javaHome;
-        }
+    @Nullable
+    public static JavaInfo getJdk(final JavaVersion version) {
+        return getAvailableJdk(new Spec<JvmInstallation>() {
+            @Override
+            public boolean isSatisfiedBy(JvmInstallation element) {
+                return version.equals(element.getJavaVersion());
+            }
+        });
+    }
 
-        if (OperatingSystem.current().isMacOsX()) {
-            // Search in the install dir used by the Apple jvms, followed by the install dir used by the OpenJDK jvms
-            List<File> installDirs = Arrays.asList(new File("/System/Library/Java/JavaVirtualMachines"), new File("/Library/Java/JavaVirtualMachines"));
-            for (File installDir : installDirs) {
-                if (installDir.isDirectory()) {
-                    for (File candidate : installDir.listFiles()) {
-                        javaHome = GFileUtils.canonicalise(new File(candidate, "Contents/Home"));
-                        if (!javaHome.equals(jvm.getJavaHome()) && javaHome.isDirectory() && new File(javaHome, "bin/java").isFile()) {
-                            return javaHome;
-                        }
-                    }
+    public static List<JavaInfo> getAvailableJvms() {
+        return FluentIterable.from(getJvms())
+            .transform(new Function<JvmInstallation, JavaInfo>() {
+                @Override
+                public JavaInfo apply(@javax.annotation.Nullable JvmInstallation input) {
+                    return Jvm.forHome(input.getJavaHome());
                 }
-            }
-        } else if (OperatingSystem.current().isLinux()) {
-            // Ubuntu specific
-            File installedJvms = new File("/usr/lib/jvm");
-            if (installedJvms.isDirectory()) {
-                for (File candidate : installedJvms.listFiles()) {
-                    javaHome = GFileUtils.canonicalise(candidate);
-                    if (!javaHome.equals(jvm.getJavaHome()) && javaHome.isDirectory() && new File(javaHome, "bin/java").isFile()) {
-                        return javaHome;
-                    }
-                }
-            }
-        } else if (OperatingSystem.current().isWindows()) {
-            //very simple algorithm trying to find java on windows
-            List<File> installDirs = new ArrayList<File>();
-            File candidate = new File("c:/Program Files/Java");
-            if (candidate.isDirectory()) {
-                installDirs.add(candidate);
-            }
-            // Attempt to look for 32-bit version under 64-bit OS
-            candidate = new File("c:/Program Files (x86)/Java");
-            if (candidate.isDirectory()) {
-                installDirs.add(candidate);
-            }
-            for (File installDir : installDirs) {
-                for (File file : installDir.listFiles()) {
-                    if (file.getName().startsWith("jdk")) {
-                        javaHome = GFileUtils.canonicalise(file);
-                        if (!javaHome.equals(jvm.getJavaHome()) && javaHome.isDirectory() && new File(javaHome, "bin/java.exe").isFile()) {
-                            return javaHome;
-                        }
-                    }
-                }
-            }
-        }
+            }).toList();
+    }
 
-        return null;
+    public static List<JavaInfo> getAvailableJdks() {
+        return getAvailableJdks(Specs.satisfyAll());
+    }
+
+    public static List<JavaInfo> getAvailableJdks(final Spec<? super JvmInstallation> filter) {
+        return FluentIterable.from(getJvms())
+            .filter(new Predicate<JvmInstallation>() {
+                @Override
+                public boolean apply(JvmInstallation input) {
+                    return input.isJdk() && filter.isSatisfiedBy(input);
+                }
+            })
+            .transform(new Function<JvmInstallation, JavaInfo>() {
+                @Override
+                public JavaInfo apply(JvmInstallation input) {
+                    return Jvm.forHome(input.getJavaHome());
+                }
+            }).toList();
+    }
+
+    public static JavaInfo getAvailableJdk(final Spec<? super JvmInstallation> filter) {
+        return Iterables.getFirst(getAvailableJdks(filter), null);
+    }
+
+    @Nullable
+    public static JavaInfo getDifferentJdk() {
+        return getAvailableJdk(new Spec<JvmInstallation>() {
+            @Override
+            public boolean isSatisfiedBy(JvmInstallation element) {
+                return !element.getJavaHome().equals(Jvm.current().getJavaHome());
+            }
+        });
+    }
+
+    @Nullable
+    public static JavaInfo getDifferentVersion() {
+        return getAvailableJdk(new Spec<JvmInstallation>() {
+            @Override
+            public boolean isSatisfiedBy(JvmInstallation element) {
+                return !element.getJavaVersion().equals(Jvm.current().getJavaVersion());
+            }
+        });
     }
 
     /**
@@ -121,13 +140,88 @@ abstract public class AvailableJavaHomes {
         return null;
     }
 
-    public static File firstAvailable(String... labels) {
-        for (String label : labels) {
-            File found = getJavaHome(label);
-            if (found != null) {
-                return found;
-            }
+    private static List<JvmInstallation> getJvms() {
+        if (jvms == null) {
+            NativeServices nativeServices = NativeServicesTestFixture.getInstance();
+            FileCanonicalizer fileCanonicalizer = nativeServices.get(FileCanonicalizer.class);
+            jvms = new ArrayList<JvmInstallation>();
+            jvms.addAll(new DevInfrastructureJvmLocator(fileCanonicalizer).findJvms());
+            InstalledJvmLocator installedJvmLocator = new InstalledJvmLocator(OperatingSystem.current(), Jvm.current(), nativeServices.get(WindowsRegistry.class), nativeServices.get(SystemInfo.class), fileCanonicalizer);
+            jvms.addAll(installedJvmLocator.findJvms());
+            jvms.addAll(new HomeDirJvmLocator(fileCanonicalizer).findJvms());
+            // Order from most recent to least recent
+            Collections.sort(jvms, new Comparator<JvmInstallation>() {
+                public int compare(JvmInstallation o1, JvmInstallation o2) {
+                    return o2.getVersion().compareTo(o1.getVersion());
+                }
+            });
         }
-        return null;
+        System.out.println("Found the following JVMs:");
+        for (JvmInstallation jvm : jvms) {
+            System.out.println("    " + jvm);
+        }
+        return jvms;
+    }
+
+    private static class DevInfrastructureJvmLocator {
+        final FileCanonicalizer fileCanonicalizer;
+
+        private DevInfrastructureJvmLocator(FileCanonicalizer fileCanonicalizer) {
+            this.fileCanonicalizer = fileCanonicalizer;
+        }
+
+        public List<JvmInstallation> findJvms() {
+            List<JvmInstallation> jvms = new ArrayList<JvmInstallation>();
+            if (OperatingSystem.current().isLinux()) {
+                jvms = addJvm(jvms, JavaVersion.VERSION_1_5, "1.5.0", new File("/opt/jdk/sun-jdk-5"), true, JvmInstallation.Arch.i386);
+                jvms = addJvm(jvms, JavaVersion.VERSION_1_6, "1.6.0", new File("/opt/jdk/sun-jdk-6"), true, JvmInstallation.Arch.x86_64);
+                jvms = addJvm(jvms, JavaVersion.VERSION_1_6, "1.6.0", new File("/opt/jdk/ibm-jdk-6"), true, JvmInstallation.Arch.x86_64);
+                jvms = addJvm(jvms, JavaVersion.VERSION_1_7, "1.7.0", new File("/opt/jdk/oracle-jdk-7"), true, JvmInstallation.Arch.x86_64);
+                jvms = addJvm(jvms, JavaVersion.VERSION_1_8, "1.8.0", new File("/opt/jdk/oracle-jdk-8"), true, JvmInstallation.Arch.x86_64);
+                jvms = addJvm(jvms, JavaVersion.VERSION_1_9, "1.9.0", new File("/opt/jdk/oracle-jdk-9"), true, JvmInstallation.Arch.x86_64);
+            }
+            return CollectionUtils.filter(jvms, new Spec<JvmInstallation>() {
+                public boolean isSatisfiedBy(JvmInstallation element) {
+                    return element.getJavaHome().isDirectory();
+                }
+            });
+        }
+
+        private List<JvmInstallation> addJvm(List<JvmInstallation> jvms, JavaVersion javaVersion, String versionString, File javaHome, boolean jdk, JvmInstallation.Arch arch) {
+            if (javaHome.exists()) {
+                jvms.add(new JvmInstallation(javaVersion, versionString, fileCanonicalizer.canonicalize(javaHome), jdk, arch));
+            }
+            return jvms;
+        }
+    }
+
+    private static class HomeDirJvmLocator {
+        private static final Pattern JDK_DIR = Pattern.compile("jdk(\\d+\\.\\d+\\.\\d+(_\\d+)?)");
+        final FileCanonicalizer fileCanonicalizer;
+
+        private HomeDirJvmLocator(FileCanonicalizer fileCanonicalizer) {
+            this.fileCanonicalizer = fileCanonicalizer;
+        }
+
+        public List<JvmInstallation> findJvms() {
+            Set<File> javaHomes = new HashSet<File>();
+            List<JvmInstallation> jvms = new ArrayList<JvmInstallation>();
+            for (File file : new File(SystemProperties.getInstance().getUserHome()).listFiles()) {
+                Matcher matcher = JDK_DIR.matcher(file.getName());
+                if (!matcher.matches()) {
+                    continue;
+                }
+                File javaHome = fileCanonicalizer.canonicalize(file);
+                if (!javaHomes.add(javaHome)) {
+                    continue;
+                }
+                if (!new File(file, "bin/javac").isFile()) {
+                    continue;
+                }
+                String version = matcher.group(1);
+                jvms.add(new JvmInstallation(JavaVersion.toVersion(version), version, file, true, JvmInstallation.Arch.Unknown));
+            }
+            return jvms;
+        }
     }
 }

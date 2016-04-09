@@ -16,35 +16,54 @@
 package org.gradle.api.tasks.diagnostics.internal;
 
 import org.gradle.api.Project;
-import org.gradle.logging.StyledTextOutput;
-import org.gradle.logging.internal.StreamingStyledTextOutput;
+import org.gradle.api.internal.file.FileResolver;
+import org.gradle.api.tasks.diagnostics.internal.text.DefaultTextReportBuilder;
+import org.gradle.api.tasks.diagnostics.internal.text.TextReportBuilder;
+import org.gradle.initialization.BuildClientMetaData;
+import org.gradle.internal.concurrent.CompositeStoppable;
+import org.gradle.internal.logging.StyledTextOutput;
+import org.gradle.internal.logging.internal.StreamingStyledTextOutput;
 import org.gradle.util.GUtil;
 
-import java.io.*;
-
-import static org.gradle.logging.StyledTextOutput.Style.Header;
-import static org.gradle.logging.StyledTextOutput.Style.Normal;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
 
 /**
  * <p>A basic {@link ReportRenderer} which writes out a text report.
  */
 public class TextReportRenderer implements ReportRenderer {
-    public static final String SEPARATOR = "------------------------------------------------------------";
+    private BuildClientMetaData clientMetaData;
+    private FileResolver fileResolver;
     private StyledTextOutput textOutput;
+    private TextReportBuilder builder;
     private boolean close;
 
+    public void setFileResolver(FileResolver fileResolver) {
+        this.fileResolver = fileResolver;
+    }
+
+    @Override
+    public void setClientMetaData(BuildClientMetaData clientMetaData) {
+        this.clientMetaData = clientMetaData;
+    }
+
+    @Override
     public void setOutput(StyledTextOutput textOutput) {
         setWriter(textOutput, false);
     }
 
+    @Override
     public void setOutputFile(File file) throws IOException {
         cleanupWriter();
         setWriter(new StreamingStyledTextOutput(new BufferedWriter(new FileWriter(file))), true);
     }
 
+    @Override
     public void startProject(Project project) {
         String header = createHeader(project);
-        writeHeading(header);
+        builder.heading(header);
     }
 
     protected String createHeader(Project project) {
@@ -60,46 +79,41 @@ public class TextReportRenderer implements ReportRenderer {
         return header;
     }
 
+    @Override
     public void completeProject(Project project) {
     }
 
-    public void complete() throws IOException {
+    @Override
+    public void complete() {
         cleanupWriter();
     }
 
     private void setWriter(StyledTextOutput styledTextOutput, boolean close) {
         this.textOutput = styledTextOutput;
+        this.builder = new DefaultTextReportBuilder(textOutput, fileResolver);
         this.close = close;
     }
 
-    private void cleanupWriter() throws IOException {
+    private void cleanupWriter() {
         try {
-            if (textOutput != null && close) {
-                ((Closeable) textOutput).close();
+            if (close) {
+                CompositeStoppable.stoppable(textOutput).stop();
             }
         } finally {
             textOutput = null;
         }
     }
 
+    public BuildClientMetaData getClientMetaData() {
+        return clientMetaData;
+    }
+
     public StyledTextOutput getTextOutput() {
         return textOutput;
     }
 
-    public void writeHeading(String heading) {
-        textOutput.println().style(Header);
-        textOutput.println(SEPARATOR);
-        textOutput.println(heading);
-        textOutput.text(SEPARATOR);
-        textOutput.style(Normal);
-        textOutput.println().println();
+    public TextReportBuilder getBuilder() {
+        return builder;
     }
 
-    public void writeSubheading(String heading) {
-        getTextOutput().style(Header).println(heading);
-        for (int i = 0; i < heading.length(); i++) {
-            getTextOutput().text("-");
-        }
-        getTextOutput().style(Normal).println();
-    }
 }

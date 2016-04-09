@@ -19,7 +19,8 @@ package org.gradle.testing.jacoco.plugins
 import org.gradle.api.Project
 import org.gradle.api.reporting.ReportingExtension
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.testing.jacoco.tasks.JacocoMerge
+import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
+import spock.lang.IgnoreIf
 import spock.lang.Issue
 
 class JacocoPluginIntegrationTest extends AbstractIntegrationSpec {
@@ -38,7 +39,7 @@ class JacocoPluginIntegrationTest extends AbstractIntegrationSpec {
                 mavenCentral()
             }
             dependencies {
-                testCompile 'junit:junit:4.11'
+                testCompile 'junit:junit:4.12'
             }
         """
         createTestFiles()
@@ -78,6 +79,7 @@ class JacocoPluginIntegrationTest extends AbstractIntegrationSpec {
         file(REPORT_HTML_DEFAULT_PATH).exists()
         file("${REPORTING_BASE}/jacoco/test").listFiles().collect { it.name } == ["html"]
         file("${REPORTING_BASE}/jacoco/test/html/org.gradle/Class1.java.html").exists()
+        htmlReport().totalCoverage() == 100
     }
 
     void canConfigureReportsInJacocoTestReport() {
@@ -96,7 +98,7 @@ class JacocoPluginIntegrationTest extends AbstractIntegrationSpec {
         succeeds('test', 'jacocoTestReport')
 
         then:
-        file("build/jacocoHtml/index.html").exists()
+        htmlReport("build/jacocoHtml").totalCoverage() == 100
         file(REPORT_XML_DEFAULT_PATH).exists()
         file(REPORT_CSV_DEFAULT_REPORT).exists()
     }
@@ -116,7 +118,7 @@ class JacocoPluginIntegrationTest extends AbstractIntegrationSpec {
         succeeds('test', 'jacocoTestReport')
 
         then:
-        file("build/customReports/jacoco/test/html/index.html").exists()
+        htmlReport("build/customReports/jacoco/test/html").totalCoverage() == 100
         file("build/customReports/jacoco/test/jacocoTestReport.xml").exists()
         file("build/customReports/jacoco/test/jacocoTestReport.csv").exists()
     }
@@ -138,32 +140,38 @@ class JacocoPluginIntegrationTest extends AbstractIntegrationSpec {
         succeeds('test', 'jacocoTestReport')
 
         then:
-        file("build/${customReportDirectory}/test/html/index.html").exists()
+        htmlReport("build/${customReportDirectory}/test/html").totalCoverage() == 100
         file("build/${customReportDirectory}/test/jacocoTestReport.xml").exists()
         file("build/${customReportDirectory}/test/jacocoTestReport.csv").exists()
     }
 
+    @IgnoreIf({GradleContextualExecuter.parallel})
     void jacocoReportIsIncremental() {
+        def reportResourceDir = file("${REPORTING_BASE}/jacoco/test/html/.resources")
+
         when:
         succeeds('test', 'jacocoTestReport')
 
         then:
-        file(REPORT_HTML_DEFAULT_PATH).exists()
+        htmlReport().exists()
+        reportResourceDir.exists()
 
         when:
         succeeds('jacocoTestReport')
 
         then:
         skippedTasks.contains(":jacocoTestReport")
-        file(REPORT_HTML_DEFAULT_PATH).exists()
+        htmlReport().exists()
+        reportResourceDir.exists()
 
         when:
-        file("${REPORTING_BASE}/jacoco/test/html/.resources").deleteDir()
+        reportResourceDir.deleteDir()
         succeeds('test', 'jacocoTestReport')
 
         then:
         !skippedTasks.contains(":jacocoTestReport")
-        file(REPORT_HTML_DEFAULT_PATH).exists()
+        htmlReport().exists()
+        reportResourceDir.exists()
     }
 
     void jacocoTestReportIsSkippedIfNoCoverageDataAvailable() {
@@ -173,6 +181,7 @@ class JacocoPluginIntegrationTest extends AbstractIntegrationSpec {
         executionResult.assertTaskSkipped(':jacocoTestReport')
     }
 
+    @IgnoreIf({GradleContextualExecuter.parallel})
     void canUseCoverageDataFromPreviousRunForCoverageReport() {
         when:
         succeeds('jacocoTestReport')
@@ -189,31 +198,59 @@ class JacocoPluginIntegrationTest extends AbstractIntegrationSpec {
 
         then:
         executedTasks.contains(":jacocoTestReport")
-        file(REPORT_HTML_DEFAULT_PATH).exists()
+        htmlReport().totalCoverage() == 100
     }
 
+    @IgnoreIf({GradleContextualExecuter.parallel})
     void canMergeCoverageData() {
         given:
+        file("src/otherMain/java/Thing.java") << """
+public class Thing {
+    Thing() { System.out.println("hi"); }
+    Thing(String msg) { System.out.println(msg); }
+}
+"""
+        file("src/otherTest/java/ThingTest.java") << """
+public class ThingTest {
+    @org.junit.Test public void someTest() { new Thing(); }
+}
+"""
+
         buildFile << """
+            sourceSets {
+                otherMain
+                otherTest
+            }
+            sourceSets.otherTest.compileClasspath = configurations.testCompile + sourceSets.otherMain.output
+            sourceSets.otherTest.runtimeClasspath = sourceSets.otherTest.compileClasspath + sourceSets.otherTest.output
+
             task otherTests(type: Test) {
                 binResultsDir file("bin")
-                testSrcDirs = test.testSrcDirs
-                testClassesDir = test.testClassesDir
-                classpath = test.classpath
+                testSrcDirs = sourceSets.otherTest.java.srcDirs as List
+                testClassesDir = sourceSets.otherTest.output.classesDir
+                classpath = sourceSets.otherTest.runtimeClasspath
             }
 
-            task jacocoMerge(type: ${JacocoMerge.name}) {
+            task jacocoMerge(type: JacocoMerge) {
                 executionData test, otherTests
+            }
+
+            task mergedReport(type: JacocoReport) {
+                executionData jacocoMerge.destinationFile
+                dependsOn jacocoMerge
+                sourceDirectories = files(sourceSets.main.java.srcDirs, sourceSets.otherMain.java.srcDirs)
+                classDirectories = files(sourceSets.main.output.classesDir, sourceSets.otherMain.output.classesDir)
             }
         """
         when:
-        succeeds 'jacocoMerge'
+        succeeds 'mergedReport'
 
         then:
         ":jacocoMerge" in nonSkippedTasks
         ":test" in nonSkippedTasks
         ":otherTests" in nonSkippedTasks
         file("build/jacoco/jacocoMerge.exec").exists()
+        htmlReport("build/reports/jacoco/mergedReport/html").totalCoverage() == 65
     }
 
     @Issue("GRADLE-2917")
@@ -221,6 +258,10 @@ class JacocoPluginIntegrationTest extends AbstractIntegrationSpec {
         expect:
         //dependencies task forces resolution of the configurations
         succeeds "dependencies", "test", "jacocoTestReport"
+    }
+
+    private JacocoReportFixture htmlReport(String basedir = "${REPORTING_BASE}/jacoco/test/html") {
+        return new JacocoReportFixture(file(basedir))
     }
 
     private void createTestFiles() {

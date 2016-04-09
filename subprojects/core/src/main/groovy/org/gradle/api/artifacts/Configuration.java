@@ -16,10 +16,12 @@
 package org.gradle.api.artifacts;
 
 import groovy.lang.Closure;
+import org.gradle.api.Action;
+import org.gradle.api.Incubating;
 import org.gradle.api.file.FileCollection;
-import org.gradle.internal.HasInternalProtocol;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.tasks.TaskDependency;
+import org.gradle.internal.HasInternalProtocol;
 
 import java.io.File;
 import java.util.Map;
@@ -89,7 +91,7 @@ public interface Configuration extends FileCollection {
             return c.getName();
         }
     }
-    
+
     /**
      * Returns true if this is a visible configuration. A visible configuration is usable outside the project it belongs
      * to. The default value is true.
@@ -99,7 +101,7 @@ public interface Configuration extends FileCollection {
     boolean isVisible();
 
     /**
-     * Sets the visibility of this configuration. When visible is set to true, this configuration is visibile outside
+     * Sets the visibility of this configuration. When visible is set to true, this configuration is visible outside
      * the project it belongs to. The default value is true.
      *
      * @param visible true if this is a visible configuration
@@ -121,7 +123,7 @@ public interface Configuration extends FileCollection {
      * @param superConfigs The super configuration. Should not be null.
      * @return this configuration
      */
-    Configuration setExtendsFrom(Set<Configuration> superConfigs);
+    Configuration setExtendsFrom(Iterable<Configuration> superConfigs);
 
     /**
      * Adds the given configurations to the set of configuration which this configuration extends from.
@@ -294,14 +296,14 @@ public interface Configuration extends FileCollection {
 
     /**
      * Returns the artifacts of this configuration excluding the artifacts of extended configurations.
-     * 
+     *
      * @return The set.
      */
     PublishArtifactSet getArtifacts();
 
     /**
      * Returns the artifacts of this configuration including the artifacts of extended configurations.
-     * 
+     *
      * @return The (read-only) set.
      */
     PublishArtifactSet getAllArtifacts();
@@ -322,6 +324,36 @@ public interface Configuration extends FileCollection {
      * @return this
      */
     Configuration exclude(Map<String, String> excludeProperties);
+
+    /**
+     * Execute the given action if the configuration has no defined dependencies when it first participates in
+     * dependency resolution. A {@code Configuration} will participate in dependency resolution
+     * when:
+     * <ul>
+     *     <li>The {@link Configuration} itself is resolved</li>
+     *     <li>Another {@link Configuration} that extends this one is resolved</li>
+     *     <li>Another {@link Configuration} that references this one as a project dependency is resolved</li>
+     * </ul>
+     *
+     *
+     * This method is useful for specifying default dependencies for a configuration:
+     * <pre autoTested='true'>
+     * configurations { conf }
+     * configurations['conf'].defaultDependencies { dependencies ->
+     *      dependencies.add(owner.project.dependencies.create("org.gradle:my-util:1.0"))
+     * }
+     * </pre>
+     *
+     * A {@code Configuration} is considered empty even if it extends another, non-empty {@code Configuration}.
+     *
+     * If multiple actions are supplied, each action will be executed until the set of dependencies is no longer empty.
+     * Remaining actions will be ignored.
+     *
+     * @param action the action to execute when the configuration has no defined dependencies.
+     * @return this
+     */
+    @Incubating
+    Configuration defaultDependencies(Action<? super DependencySet> action);
 
     /**
      * Returns all the configurations belonging to the same configuration container as this

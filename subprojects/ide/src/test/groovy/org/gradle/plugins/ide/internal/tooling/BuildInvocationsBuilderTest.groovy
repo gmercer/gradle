@@ -18,7 +18,6 @@ package org.gradle.plugins.ide.internal.tooling
 
 import org.gradle.api.DefaultTask
 import org.gradle.api.internal.project.DefaultProjectTaskLister
-import org.gradle.tooling.internal.impl.LaunchableGradleTaskSelector
 import org.gradle.tooling.model.gradle.BuildInvocations
 import org.gradle.util.TestUtil
 import spock.lang.Shared
@@ -26,55 +25,115 @@ import spock.lang.Specification
 import spock.lang.Unroll
 
 class BuildInvocationsBuilderTest extends Specification {
-    def builder = new BuildInvocationsBuilder(new DefaultProjectTaskLister())
-    @Shared def project = TestUtil.builder().withName("root").build()
-    @Shared def child1 = TestUtil.builder().withName("child1").withParent(project).build()
-    @Shared def child1a = TestUtil.builder().withName("child1a").withParent(child1).build()
-    @Shared def child1b = TestUtil.builder().withName("child1b").withParent(child1).build()
+    @Shared
+    def project = TestUtil.builder().withName("root").build()
+    @Shared
+    def child = TestUtil.builder().withName("child").withParent(project).build()
+    @Shared
+    def grandChild1OfChild = TestUtil.builder().withName("grandChild1").withParent(child).build()
+    @Shared
+    def grandChild2OfChild = TestUtil.builder().withName("grandChild2").withParent(child).build()
 
     def setupSpec() {
-        child1a.tasks.create('t1', DefaultTask)
-        child1b.tasks.create('t1', DefaultTask)
-        child1b.tasks.create('t2', DefaultTask)
-        child1.tasks.create('t2', DefaultTask)
-        project.tasks.create('t3', DefaultTask)
+        // create a project/task tree:
+        //   root (t1, t2)
+        //   +--- child 1 (t2, t3)
+        //        +-- grand child (t3, t4)
+        //        +-- grand child (t4)
+
+        // root tasks (one public, one private)
+        def task1OfRoot = project.tasks.create('t1', DefaultTask)
+        task1OfRoot.group = 'build'
+        task1OfRoot.description = 'T1 from root'
+
+        def task2OfRoot = project.tasks.create('t2', DefaultTask)
+        task2OfRoot.group = null
+        task2OfRoot.description = null
+
+        // child tasks (one public, one private)
+        def task1OfChild1 = child.tasks.create('t2', DefaultTask)
+        task1OfChild1.group = 'build'
+        task1OfChild1.description = 'T2 from child'
+
+        def task2OfChild1 = child.tasks.create('t3', DefaultTask)
+        task2OfChild1.group = null
+        task2OfChild1.description = 'T3 from child'
+
+        // grand child tasks (one public, one private)
+        def task1OfGrandChild = grandChild1OfChild.tasks.create('t3', DefaultTask)
+        task1OfGrandChild.group = 'build'
+        task1OfGrandChild.description = null
+
+        def task2OfGrandChild = grandChild1OfChild.tasks.create('t4', DefaultTask)
+        task2OfGrandChild.group = null
+        task2OfGrandChild.description = 'T4 from grand child 1'
+
+        def taskOfGrandChild2 = grandChild2OfChild.tasks.create('t4', DefaultTask)
+        taskOfGrandChild2.group = null
+        taskOfGrandChild2.description = 'T4 from grand child 2'
     }
 
-    def "can build model"() {
-        expect:
-        builder.canBuild(BuildInvocations.name)
-    }
+    def "BuildInvocations model is accepted"() {
+        given:
+        def builder = new BuildInvocationsBuilder(new DefaultProjectTaskLister())
 
-    @Unroll("builds model for #startProject")
-    def "builds model"() {
-        expect:
-        def model = builder.buildAll("org.gradle.tooling.model.gradle.BuildInvocations", startProject)
-        model.taskSelectors*.name as Set == selectorNames as Set
-        model.taskSelectors*.projectPath as Set == [startProject.path] as Set
-        // model.taskSelectors.find { it.name == 't1' }?.tasks == t1Tasks as Set
-
-        where:
-        startProject | selectorNames
-        project      | ['t1', 't2', 't3']
-        child1       | ['t1', 't2']
-        child1a      | ['t1']
-    }
-
-    def "builds recursive model"() {
         when:
-        def model = builder.buildAll("org.gradle.tooling.model.gradle.BuildInvocations", project, true)
+        def canBuild = builder.canBuild(BuildInvocations.name)
 
         then:
-        model.taskSelectors.size() == 3
+        canBuild
+    }
+
+    @Unroll("tasks and selectors for #startProject")
+    def "BuildInvocations model is created from tasks and task selectors for given project and its subprojects"() {
+        given:
+        def builder = new BuildInvocationsBuilder(new DefaultProjectTaskLister())
+
+        when:
+        def model = builder.buildAll("org.gradle.tooling.model.gradle.BuildInvocations", startProject)
+
+        then:
+        model.taskSelectors*.projectPath as Set == [startProject.path] as Set
+        model.taskSelectors*.name as Set == selectorNames as Set
+        model.tasks*.name as Set == taskNames as Set
+
+        model.taskSelectors.findAll { it.public }*.name as Set == visibleSelectors as Set
+        model.tasks.findAll { it.public }*.name as Set == visibleTasks as Set
+
+        where:
+        startProject       | selectorNames            | taskNames     | visibleSelectors   | visibleTasks
+        project            | ['t1', 't2', 't3', 't4'] | ['t1', 't2']  | ['t1', 't2', 't3'] | ['t1']
+        child              | ['t2', 't3', 't4']       | ['t2', 't3',] | ['t2', 't3']       | ['t2']
+        grandChild1OfChild | ['t3', 't4']             | ['t3', 't4',] | ['t3']             | ['t3']
+        grandChild2OfChild | ['t4']                   | ['t4',]       | []                 | []
+    }
+
+    def "BuildInvocations model is created for root project if implicitProject flag is set"() {
+        given:
+        def builder = new BuildInvocationsBuilder(new DefaultProjectTaskLister())
+
+        when:
+        def model = builder.buildAll("org.gradle.tooling.model.gradle.BuildInvocations", child, true)
+
+        then:
+        model.taskSelectors*.name as Set == ['t1', 't2', 't3', 't4'] as Set
         model.taskSelectors.each { it ->
             assert it.projectPath == ':'
-            assert it.name != null
-            assert it.displayName != null
-            assert it.description != null
         }
-        def t1Selector = model.taskSelectors.find { LaunchableGradleTaskSelector it ->
-            it.name == 't1' && it.description.startsWith("t1")
-        }
-        model.taskSelectors*.name as Set == ['t1', 't2', 't3'] as Set
     }
+
+    def "TaskSelector description is taken from task that TaskNameComparator considers to be of lowest ordering"() {
+        given:
+        def builder = new BuildInvocationsBuilder(new DefaultProjectTaskLister())
+
+        when:
+        def model = builder.buildAll("org.gradle.tooling.model.gradle.BuildInvocations", project)
+
+        then:
+        assert model.taskSelectors.find { it.name == 't1' }.description == 'T1 from root'
+        assert model.taskSelectors.find { it.name == 't2' }.description == null
+        assert model.taskSelectors.find { it.name == 't3' }.description == 'T3 from child'
+        assert model.taskSelectors.find { it.name == 't4' }.description == 'T4 from grand child 1'
+    }
+
 }

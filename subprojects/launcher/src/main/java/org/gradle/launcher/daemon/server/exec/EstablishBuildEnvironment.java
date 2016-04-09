@@ -17,13 +17,15 @@ package org.gradle.launcher.daemon.server.exec;
 
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
+import org.gradle.internal.FileUtils;
 import org.gradle.internal.SystemProperties;
-import org.gradle.internal.nativeplatform.ProcessEnvironment;
+import org.gradle.internal.nativeintegration.ProcessEnvironment;
 import org.gradle.launcher.daemon.protocol.Build;
-import org.gradle.util.GFileUtils;
+import org.gradle.launcher.daemon.server.api.DaemonCommandExecution;
 
 import java.io.File;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 
@@ -43,12 +45,19 @@ public class EstablishBuildEnvironment extends BuildCommandOnly {
         Properties originalSystemProperties = new Properties();
         originalSystemProperties.putAll(System.getProperties());
         Map<String, String> originalEnv = new HashMap<String, String>(System.getenv());
-        File originalProcessDir = GFileUtils.canonicalise(new File("."));
+        File originalProcessDir = FileUtils.canonicalize(new File("."));
 
         for (Map.Entry<String, String> entry : build.getParameters().getSystemProperties().entrySet()) {
-            if (SystemProperties.getStandardProperties().contains(entry.getKey())) { continue; }
-            if (SystemProperties.getNonStandardImportantProperties().contains(entry.getKey())) { continue; }
-            if (entry.getKey().startsWith("sun.")) { continue; }
+            if (SystemProperties.getInstance().getStandardProperties().contains(entry.getKey())) {
+                continue;
+            }
+            if (SystemProperties.getInstance().getNonStandardImportantProperties().contains(entry.getKey())) {
+                continue;
+            }
+            if (entry.getKey().startsWith("sun.") || entry.getKey().startsWith("awt.")
+                    || entry.getKey().contains(".awt.")) {
+                continue;
+            }
             System.setProperty(entry.getKey(), entry.getValue());
         }
 
@@ -56,12 +65,16 @@ public class EstablishBuildEnvironment extends BuildCommandOnly {
         processEnvironment.maybeSetEnvironment(build.getParameters().getEnvVariables());
         processEnvironment.maybeSetProcessDir(build.getParameters().getCurrentDir());
 
+        // Capture and restore this in case the build code calls Locale.setDefault()
+        Locale locale = Locale.getDefault();
+
         try {
             execution.proceed();
         } finally {
             System.setProperties(originalSystemProperties);
             processEnvironment.maybeSetEnvironment(originalEnv);
             processEnvironment.maybeSetProcessDir(originalProcessDir);
+            Locale.setDefault(locale);
         }
     }
 }

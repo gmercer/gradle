@@ -15,51 +15,76 @@
  */
 package org.gradle.tooling.internal.provider;
 
-import org.gradle.internal.nativeplatform.services.NativeServices;
+import org.gradle.api.JavaVersion;
+import org.gradle.initialization.BuildCancellationToken;
+import org.gradle.initialization.BuildLayoutParameters;
+import org.gradle.initialization.DefaultBuildCancellationToken;
+import org.gradle.internal.Cast;
+import org.gradle.internal.concurrent.CompositeStoppable;
+import org.gradle.internal.jvm.UnsupportedJavaRuntimeException;
+import org.gradle.internal.nativeintegration.services.NativeServices;
 import org.gradle.internal.service.ServiceRegistry;
 import org.gradle.internal.service.ServiceRegistryBuilder;
-import org.gradle.logging.LoggingServiceRegistry;
+import org.gradle.internal.logging.LoggingServiceRegistry;
 import org.gradle.tooling.UnsupportedVersionException;
 import org.gradle.tooling.internal.adapter.ProtocolToModelAdapter;
 import org.gradle.tooling.internal.consumer.versioning.ModelMapping;
 import org.gradle.tooling.internal.protocol.*;
 import org.gradle.tooling.internal.protocol.exceptions.InternalUnsupportedBuildArgumentException;
-import org.gradle.tooling.internal.provider.connection.*;
+import org.gradle.tooling.internal.protocol.test.InternalTestExecutionConnection;
+import org.gradle.tooling.internal.protocol.test.InternalTestExecutionRequest;
+import org.gradle.tooling.internal.provider.connection.BuildLogLevelMixIn;
+import org.gradle.tooling.internal.provider.connection.ProviderBuildResult;
+import org.gradle.tooling.internal.provider.connection.ProviderConnectionParameters;
+import org.gradle.tooling.internal.provider.connection.ProviderOperationParameters;
+import org.gradle.tooling.internal.provider.test.ProviderInternalTestExecutionRequest;
 import org.gradle.util.GradleVersion;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class DefaultConnection implements InternalConnection, BuildActionRunner, ConfigurableConnection, ModelBuilder, InternalBuildActionExecutor {
+import java.io.File;
+
+public class DefaultConnection implements InternalConnection, BuildActionRunner,
+    ConfigurableConnection, ModelBuilder, InternalBuildActionExecutor, InternalCancellableConnection, StoppableConnection, InternalTestExecutionConnection, InternalCompositeAwareConnection {
     private static final Logger LOGGER = LoggerFactory.getLogger(DefaultConnection.class);
-    private final ProtocolToModelAdapter adapter;
-    private final ServiceRegistry services;
-    private final ProviderConnection connection;
+    private ProtocolToModelAdapter adapter;
+    private ServiceRegistry services;
+    private ProviderConnection connection;
 
     /**
      * This is used by consumers 1.0-milestone-3 and later
      */
     public DefaultConnection() {
         LOGGER.debug("Tooling API provider {} created.", GradleVersion.current().getVersion());
-        LoggingServiceRegistry loggingServices = LoggingServiceRegistry.newEmbeddableLogging();
-        services = ServiceRegistryBuilder.builder()
-                .displayName("Connection services")
-                .parent(loggingServices)
-                .parent(NativeServices.getInstance())
-                .provider(new ConnectionScopeServices(loggingServices)).build();
-        adapter = services.get(ProtocolToModelAdapter.class);
-        connection = services.get(ProviderConnection.class);
     }
 
     /**
      * This is used by consumers 1.2-rc-1 and later.
      */
     public void configure(ConnectionParameters parameters) {
-        ProviderConnectionParameters providerConnectionParameters = adapter.adapt(ProviderConnectionParameters.class, parameters);
+        ProviderConnectionParameters providerConnectionParameters = new ProtocolToModelAdapter().adapt(ProviderConnectionParameters.class, parameters);
+        File gradleUserHomeDir = providerConnectionParameters.getGradleUserHomeDir(null);
+        if (gradleUserHomeDir == null) {
+            gradleUserHomeDir = new BuildLayoutParameters().getGradleUserHomeDir();
+        }
+        initializeServices(gradleUserHomeDir);
         connection.configure(providerConnectionParameters);
     }
 
+    private void initializeServices(File gradleUserHomeDir) {
+        NativeServices.initialize(gradleUserHomeDir);
+        LoggingServiceRegistry loggingServices = LoggingServiceRegistry.newEmbeddableLogging();
+        services = ServiceRegistryBuilder.builder()
+            .displayName("Connection services")
+            .parent(loggingServices)
+            .parent(NativeServices.getInstance())
+            .provider(new ConnectionScopeServices(loggingServices)).build();
+        adapter = services.get(ProtocolToModelAdapter.class);
+        connection = services.get(ProviderConnection.class);
+    }
+
     /**
-     * This method was used by consumers 1.0-rc-1 through to 1.1. Later consumers use {@link #configure(org.gradle.tooling.internal.protocol.ConnectionParameters)} instead.
+     * This method was used by consumers 1.0-rc-1 through to 1.1. Later consumers use {@link #configure(ConnectionParameters)} instead.
      */
     public void configureLogging(final boolean verboseLogging) {
         // Ignore - we don't support these consumer versions any more
@@ -75,9 +100,16 @@ public class DefaultConnection implements InternalConnection, BuildActionRunner,
     /**
      * This is used by consumers 1.0-milestone-3 and later
      */
+    @Deprecated
     public void stop() {
-        // TODO:ADAM - switch this on again. Need to add a new protocol method, as older consumers call `stop()` at the end of every operation.
-//        services.close();
+        // We don't do anything here, as older consumers call this method when the project connection is closed but then later attempt to reuse the connection
+    }
+
+    /**
+     * This is used by consumers 2.2-rc-1 and later
+     */
+    public void shutdown(ShutdownParameters parameters) {
+        CompositeStoppable.stoppable(services).stop();
     }
 
     /**
@@ -104,20 +136,15 @@ public class DefaultConnection implements InternalConnection, BuildActionRunner,
         throw unsupportedConnectionException();
     }
 
-    private <T> T run(Class<T> type, BuildOperationParametersVersion1 parameters) {
-        String modelName = new ModelMapping().getModelNameFromProtocolType(type);
-        return (T) connection.run(modelName, new AdaptedOperationParameters(parameters));
-    }
-
     /**
      * This is used by consumers 1.2-rc-1 to 1.5
      */
     @Deprecated
     public <T> BuildResult<T> run(Class<T> type, BuildParameters buildParameters) throws UnsupportedOperationException, IllegalStateException {
-        logTargetVersion();
+        validateCanRun();
         ProviderOperationParameters providerParameters = toProviderParameters(buildParameters);
         String modelName = new ModelMapping().getModelNameFromProtocolType(type);
-        T result = (T) connection.run(modelName, providerParameters);
+        T result = Cast.uncheckedCast(connection.run(modelName, new DefaultBuildCancellationToken(), providerParameters));
         return new ProviderBuildResult<T>(result);
     }
 
@@ -125,9 +152,31 @@ public class DefaultConnection implements InternalConnection, BuildActionRunner,
      * This is used by consumers 1.6-rc-1 and later
      */
     public BuildResult<?> getModel(ModelIdentifier modelIdentifier, BuildParameters operationParameters) throws UnsupportedOperationException, IllegalStateException {
-        logTargetVersion();
+        validateCanRun();
         ProviderOperationParameters providerParameters = toProviderParameters(operationParameters);
-        Object result = connection.run(modelIdentifier.getName(), providerParameters);
+        Object result = connection.run(modelIdentifier.getName(), new DefaultBuildCancellationToken(), providerParameters);
+        return new ProviderBuildResult<Object>(result);
+    }
+
+    /**
+     * This is used by consumers 2.1-rc-1 and later
+     */
+    public BuildResult<?> getModel(ModelIdentifier modelIdentifier, InternalCancellationToken cancellationToken, BuildParameters operationParameters) throws BuildExceptionVersion1, InternalUnsupportedModelException, InternalUnsupportedBuildArgumentException, IllegalStateException {
+        validateCanRun();
+        ProviderOperationParameters providerParameters = toProviderParameters(operationParameters);
+        BuildCancellationToken buildCancellationToken = new InternalCancellationTokenAdapter(cancellationToken);
+        Object result = connection.run(modelIdentifier.getName(), buildCancellationToken, providerParameters);
+        return new ProviderBuildResult<Object>(result);
+    }
+
+    /**
+     * This is used by consumers 2.13-rc-1 and later
+     */
+    public BuildResult<?> getModels(ModelIdentifier modelIdentifier, InternalCancellationToken cancellationToken, BuildParameters operationParameters) throws BuildExceptionVersion1, InternalUnsupportedModelException, InternalUnsupportedBuildArgumentException, IllegalStateException {
+        validateCanRun();
+        ProviderOperationParameters providerParameters = toProviderParameters(operationParameters);
+        BuildCancellationToken buildCancellationToken = new InternalCancellationTokenAdapter(cancellationToken);
+        Object result = connection.buildModels(modelIdentifier.getName(), buildCancellationToken, providerParameters);
         return new ProviderBuildResult<Object>(result);
     }
 
@@ -135,18 +184,46 @@ public class DefaultConnection implements InternalConnection, BuildActionRunner,
      * This is used by consumers 1.8-rc-1 and later.
      */
     public <T> BuildResult<T> run(InternalBuildAction<T> action, BuildParameters operationParameters) throws BuildExceptionVersion1, InternalUnsupportedBuildArgumentException, IllegalStateException {
-        logTargetVersion();
+        validateCanRun();
         ProviderOperationParameters providerParameters = toProviderParameters(operationParameters);
-        Object results = connection.run(action, providerParameters);
+        Object results = connection.run(action, new DefaultBuildCancellationToken(), providerParameters);
         return new ProviderBuildResult<T>((T) results);
     }
 
-    private void logTargetVersion() {
+    /**
+     * This is used by consumers 2.1-rc-1 and later.
+     */
+    public <T> BuildResult<T> run(InternalBuildAction<T> action, InternalCancellationToken cancellationToken, BuildParameters operationParameters)
+        throws BuildExceptionVersion1, InternalUnsupportedBuildArgumentException, IllegalStateException {
+        validateCanRun();
+        ProviderOperationParameters providerParameters = toProviderParameters(operationParameters);
+        BuildCancellationToken buildCancellationToken = new InternalCancellationTokenAdapter(cancellationToken);
+        Object results = connection.run(action, buildCancellationToken, providerParameters);
+        return new ProviderBuildResult<T>((T) results);
+    }
+
+    /**
+     * This is used by consumers 2.6-rc1 and later.
+     */
+    public BuildResult<?> runTests(InternalTestExecutionRequest testExecutionRequest, InternalCancellationToken cancellationToken, BuildParameters operationParameters)
+        throws BuildExceptionVersion1, InternalUnsupportedBuildArgumentException, IllegalStateException {
+        validateCanRun();
+        ProviderInternalTestExecutionRequest testExecutionRequestVersion2 = adapter.adapt(ProviderInternalTestExecutionRequest.class, testExecutionRequest);
+        ProviderOperationParameters providerParameters = toProviderParameters(operationParameters);
+        BuildCancellationToken buildCancellationToken = new InternalCancellationTokenAdapter(cancellationToken);
+        Object results = connection.runTests(testExecutionRequestVersion2, buildCancellationToken, providerParameters);
+        return new ProviderBuildResult<Object>(results);
+    }
+
+    private void validateCanRun() {
         LOGGER.info("Tooling API is using target Gradle version: {}.", GradleVersion.current().getVersion());
+        if (!JavaVersion.current().isJava6Compatible()) {
+            throw UnsupportedJavaRuntimeException.usingUnsupportedVersion("Gradle", JavaVersion.VERSION_1_6);
+        }
     }
 
     private UnsupportedVersionException unsupportedConnectionException() {
-        return new UnsupportedVersionException("Consumers using version older than 1.2 are not supported.");
+        return new UnsupportedVersionException("Support for clients using a tooling API version older than 1.2 was removed in Gradle 2.0. You should upgrade your tooling API client to version 1.2 or later.");
     }
 
     private ProviderOperationParameters toProviderParameters(BuildParameters buildParameters) {

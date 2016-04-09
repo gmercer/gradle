@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- 
+
 package org.gradle.api.plugins
 
 import org.gradle.api.Project
@@ -22,13 +22,13 @@ import org.gradle.api.reporting.ReportingExtension
 import org.gradle.api.tasks.compile.GroovyCompile
 import org.gradle.api.tasks.javadoc.Groovydoc
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
+import org.gradle.util.Matchers
 import org.gradle.util.TestUtil
 import org.junit.Rule
 import org.junit.Test
 
 import static org.gradle.api.tasks.TaskDependencyMatchers.dependsOn
 import static org.gradle.util.WrapUtil.toLinkedSet
-import static org.gradle.util.WrapUtil.toSet
 import static org.hamcrest.Matchers.*
 import static org.junit.Assert.*
 
@@ -38,22 +38,25 @@ class GroovyPluginTest {
     private final Project project = TestUtil.createRootProject()
     private final GroovyPlugin groovyPlugin = new GroovyPlugin()
 
-    @Test public void appliesTheJavaPluginToTheProject() {
+    @Test
+    public void appliesTheJavaPluginToTheProject() {
         groovyPlugin.apply(project)
 
         assertTrue(project.getPlugins().hasPlugin(JavaPlugin));
     }
 
-    @Test public void addsGroovyConfigurationToTheProject() {
+    @Test
+    public void addsGroovyConfigurationToTheProject() {
         groovyPlugin.apply(project)
 
         def configuration = project.configurations.getByName(JavaPlugin.COMPILE_CONFIGURATION_NAME)
-        assertThat(Configurations.getNames(configuration.extendsFrom, false), equalTo(toSet(GroovyBasePlugin.GROOVY_CONFIGURATION_NAME)))
+        assertThat(Configurations.getNames(configuration.extendsFrom), Matchers.isEmpty())
         assertFalse(configuration.visible)
         assertTrue(configuration.transitive)
     }
 
-    @Test public void addsGroovyConventionToEachSourceSet() {
+    @Test
+    public void addsGroovyConventionToEachSourceSet() {
         groovyPlugin.apply(project)
 
         def sourceSet = project.sourceSets.main
@@ -65,7 +68,8 @@ class GroovyPluginTest {
         assertThat(sourceSet.groovy.srcDirs, equalTo(toLinkedSet(project.file("src/test/groovy"))))
     }
 
-    @Test public void addsCompileTaskForEachSourceSet() {
+    @Test
+    public void addsCompileTaskForEachSourceSet() {
         groovyPlugin.apply(project)
 
         def task = project.tasks['compileGroovy']
@@ -79,7 +83,8 @@ class GroovyPluginTest {
         assertThat(task, dependsOn(JavaPlugin.COMPILE_TEST_JAVA_TASK_NAME, JavaPlugin.CLASSES_TASK_NAME))
     }
 
-    @Test public void dependenciesOfJavaPluginTasksIncludeGroovyCompileTasks() {
+    @Test
+    public void dependenciesOfJavaPluginTasksIncludeGroovyCompileTasks() {
         groovyPlugin.apply(project)
 
         def task = project.tasks[JavaPlugin.CLASSES_TASK_NAME]
@@ -88,8 +93,9 @@ class GroovyPluginTest {
         task = project.tasks[JavaPlugin.TEST_CLASSES_TASK_NAME]
         assertThat(task, dependsOn(hasItem('compileTestGroovy')))
     }
-    
-    @Test public void addsStandardTasksToTheProject() {
+
+    @Test
+    public void addsStandardTasksToTheProject() {
         groovyPlugin.apply(project)
 
         project.sourceSets.main.groovy.srcDirs(tmpDir.getTestDirectory())

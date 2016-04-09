@@ -15,43 +15,8 @@
  */
 package org.gradle.internal.nativeplatform.filesystem;
 
-import java.io.File;
-
 /**
  * A file system accessible to Gradle.
  */
-public interface FileSystem extends Chmod, Stat {
-    /**
-     * Default Unix permissions for directories, {@code 755}.
-     */
-    public static final int DEFAULT_DIR_MODE = 0755;
-
-    /**
-     * Default Unix permissions for files, {@code 644}.
-     */
-    public static final int DEFAULT_FILE_MODE = 0644;
-
-    /**
-     * Tells whether the file system is case sensitive.
-     *
-     * @return <tt>true</tt> if the file system is case sensitive, <tt>false</tt> otherwise
-     */
-    boolean isCaseSensitive();
-
-    /**
-     * Tells if the file system can create symbolic links. If the answer cannot be determined accurately,
-     * <tt>false</tt> is returned.
-     *
-     * @return <tt>true</tt> if the file system can create symbolic links, <tt>false</tt> otherwise
-     */
-    boolean canCreateSymbolicLink();
-
-    /**
-     * Creates a symbolic link to a target file.
-     *
-     * @param link the link to be created
-     * @param target the file to link to
-     * @exception FileException if the operation fails
-     */
-    void createSymbolicLink(File link, File target) throws FileException;
+public interface FileSystem extends org.gradle.internal.nativeintegration.filesystem.FileSystem {
 }

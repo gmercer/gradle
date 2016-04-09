@@ -22,7 +22,7 @@ import org.gradle.api.Project
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.ConfigurationContainer
 import org.gradle.api.artifacts.Dependency
-import org.gradle.api.artifacts.ResolvableDependencies
+import org.gradle.api.artifacts.DependencySet
 import org.gradle.api.artifacts.dsl.DependencyHandler
 import org.gradle.api.plugins.ReportingBasePlugin
 import org.gradle.internal.Factory
@@ -33,23 +33,23 @@ import org.gradle.plugins.javascript.rhino.RhinoExtension
 import org.gradle.plugins.javascript.rhino.RhinoPlugin
 import org.gradle.plugins.javascript.rhino.worker.RhinoWorkerHandleFactory
 import org.gradle.plugins.javascript.rhino.worker.internal.DefaultRhinoWorkerHandleFactory
-import org.gradle.process.internal.WorkerProcessBuilder
+import org.gradle.process.internal.worker.WorkerProcessFactory
 
 import javax.inject.Inject
 
 import static org.gradle.plugins.javascript.envjs.EnvJsExtension.*
 
 class EnvJsPlugin implements Plugin<Project> {
-    private final Factory<WorkerProcessBuilder> workerProcessBuilderFactory
+    private final WorkerProcessFactory workerProcessBuilderFactory
 
     @Inject
-    EnvJsPlugin(Factory<WorkerProcessBuilder> workerProcessBuilderFactory) {
+    EnvJsPlugin(WorkerProcessFactory workerProcessBuilderFactory) {
         this.workerProcessBuilderFactory = workerProcessBuilderFactory
     }
 
     void apply(Project project) {
-        project.plugins.apply(RhinoPlugin)
-        project.plugins.apply(ReportingBasePlugin)
+        project.pluginManager.apply(RhinoPlugin)
+        project.pluginManager.apply(ReportingBasePlugin)
 
         JavaScriptExtension jsExtension = project.extensions.getByType(JavaScriptExtension)
         EnvJsExtension envJsExtension = jsExtension.extensions.create(EnvJsExtension.NAME, EnvJsExtension)
@@ -84,17 +84,14 @@ class EnvJsPlugin implements Plugin<Project> {
 
     Configuration addConfiguration(ConfigurationContainer configurations, DependencyHandler dependencies, EnvJsExtension extension) {
         Configuration configuration = configurations.create(EnvJsExtension.CONFIGURATION_NAME)
-        configuration.incoming.beforeResolve(new Action<ResolvableDependencies>() {
-            void execute(ResolvableDependencies resolvableDependencies) {
-                if (configuration.dependencies.empty) {
-                    String notation = "${DEFAULT_DEPENDENCY_GROUP}:${DEFAULT_DEPENDENCY_MODULE}:${extension.version}@js"
-                    Dependency dependency = dependencies.create(notation)
-                    configuration.dependencies.add(dependency)
-                }
+        configuration.defaultDependencies(new Action<DependencySet>() {
+            @Override
+            void execute(DependencySet configDependencies) {
+                String notation = "${DEFAULT_DEPENDENCY_GROUP}:${DEFAULT_DEPENDENCY_MODULE}:${extension.version}@js"
+                Dependency dependency = dependencies.create(notation)
+                configDependencies.add(dependency)
             }
         })
         configuration
-
-
     }
 }

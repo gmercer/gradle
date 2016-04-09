@@ -18,25 +18,29 @@ package org.gradle.api.internal.file.copy;
 import com.google.common.collect.ImmutableList;
 import groovy.lang.Closure;
 import org.gradle.api.Action;
+import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.NonExtensible;
 import org.gradle.api.file.*;
 import org.gradle.api.internal.ChainingTransformer;
 import org.gradle.api.internal.ClosureBackedAction;
 import org.gradle.api.internal.file.FileResolver;
 import org.gradle.api.internal.file.pattern.PatternMatcherFactory;
-import org.gradle.api.specs.NotSpec;
 import org.gradle.api.specs.Spec;
+import org.gradle.api.specs.Specs;
 import org.gradle.api.tasks.util.PatternSet;
 import org.gradle.internal.reflect.Instantiator;
+import org.gradle.internal.typeconversion.NotationParser;
 import org.gradle.util.ConfigureUtil;
 
 import java.io.File;
 import java.io.FilterReader;
+import java.nio.charset.Charset;
 import java.util.*;
 import java.util.regex.Pattern;
 
 @NonExtensible
 public class DefaultCopySpec implements CopySpecInternal {
+    private static final NotationParser<Object, String> PATH_NOTATION_PARSER = PathNotationConverter.parser();
     protected final FileResolver fileResolver;
     private final Set<Object> sourcePaths;
     private Object destDir;
@@ -49,13 +53,15 @@ public class DefaultCopySpec implements CopySpecInternal {
     private Boolean caseSensitive;
     private Boolean includeEmptyDirs;
     private DuplicatesStrategy duplicatesStrategy;
+    private String filteringCharset;
+
 
     public DefaultCopySpec(FileResolver resolver, Instantiator instantiator) {
         this.fileResolver = resolver;
         this.instantiator = instantiator;
         sourcePaths = new LinkedHashSet<Object>();
         childSpecs = new ArrayList<CopySpecInternal>();
-        patternSet = new PatternSet();
+        patternSet = resolver.getPatternSetFactory().create();
         duplicatesStrategy = null;
     }
 
@@ -164,13 +170,12 @@ public class DefaultCopySpec implements CopySpecInternal {
     public CopySpec filesMatching(String pattern, Action<? super FileCopyDetails> action) {
         Spec<RelativePath> matcher = PatternMatcherFactory.getPatternMatcher(true, isCaseSensitive(), pattern);
         return eachFile(
-                new MatchingCopyAction(matcher, action));
+            new MatchingCopyAction(matcher, action));
     }
 
     public CopySpec filesNotMatching(String pattern, Action<? super FileCopyDetails> action) {
         Spec<RelativePath> matcher = PatternMatcherFactory.getPatternMatcher(true, isCaseSensitive(), pattern);
-        return eachFile(
-                new MatchingCopyAction(new NotSpec<RelativePath>(matcher), action));
+        return eachFile(new MatchingCopyAction(Specs.<RelativePath>negate(matcher), action));
     }
 
     public CopySpec include(String... includes) {
@@ -340,16 +345,27 @@ public class DefaultCopySpec implements CopySpecInternal {
         return this.new DefaultCopySpecResolver(null);
     }
 
+    public String getFilteringCharset() {
+        return buildRootResolver().getFilteringCharset();
+    }
+
+    public void setFilteringCharset(String charset) {
+        if (charset == null) {
+            throw new InvalidUserDataException("filteringCharset must not be null");
+        }
+        if (!Charset.isSupported(charset)) {
+            throw new InvalidUserDataException(String.format("filteringCharset %s is not supported by your JVM", charset));
+        }
+        this.filteringCharset = charset;
+    }
+
     public class DefaultCopySpecResolver implements CopySpecResolver {
 
         private CopySpecResolver parentResolver;
-        private PathNotationParser<String> pathNotationParser;
 
         private DefaultCopySpecResolver(CopySpecResolver parent) {
             this.parentResolver = parent;
-            this.pathNotationParser = new PathNotationParser<String>();
         }
-
 
         public RelativePath getDestPath() {
 
@@ -364,7 +380,7 @@ public class DefaultCopySpec implements CopySpecInternal {
                 return parentPath;
             }
 
-            String path = pathNotationParser.parseNotation(destDir);
+            String path = PATH_NOTATION_PARSER.parseNotation(destDir);
             if (path.startsWith("/") || path.startsWith(File.separator)) {
                 return RelativePath.parse(false, path);
             }
@@ -486,7 +502,7 @@ public class DefaultCopySpec implements CopySpecInternal {
         }
 
         public PatternSet getPatternSet() {
-            PatternSet patterns = new PatternSet();
+            PatternSet patterns = fileResolver.getPatternSetFactory().create();
             patterns.setCaseSensitive(isCaseSensitive());
             patterns.include(this.getAllIncludes());
             patterns.includeSpecs(getAllIncludeSpecs());
@@ -501,6 +517,18 @@ public class DefaultCopySpec implements CopySpecInternal {
                 child.buildResolverRelativeToParent(this).walk(action);
             }
         }
+
+        public String getFilteringCharset() {
+            if (filteringCharset != null) {
+                return filteringCharset;
+            }
+            if (parentResolver != null) {
+                return parentResolver.getFilteringCharset();
+            }
+            return Charset.defaultCharset().name();
+        }
+
+
     }
 
 }

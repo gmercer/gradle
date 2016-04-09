@@ -18,7 +18,7 @@ package org.gradle.launcher.daemon.registry;
 import org.gradle.api.specs.Spec;
 import org.gradle.api.specs.Specs;
 import org.gradle.launcher.daemon.context.DaemonContext;
-import org.gradle.messaging.remote.Address;
+import org.gradle.internal.remote.Address;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,14 +44,14 @@ public class EmbeddedDaemonRegistry implements DaemonRegistry {
     };
 
     @SuppressWarnings("unchecked")
-    private final Spec<DaemonInfo> idleSpec = Specs.<DaemonInfo>and(allSpec, new Spec<DaemonInfo>() {
+    private final Spec<DaemonInfo> idleSpec = Specs.<DaemonInfo>intersect(allSpec, new Spec<DaemonInfo>() {
         public boolean isSatisfiedBy(DaemonInfo daemonInfo) {
             return daemonInfo.isIdle();
         }
     });
 
     @SuppressWarnings("unchecked")
-    private final Spec<DaemonInfo> busySpec = Specs.<DaemonInfo>and(allSpec, new Spec<DaemonInfo>() {
+    private final Spec<DaemonInfo> busySpec = Specs.<DaemonInfo>intersect(allSpec, new Spec<DaemonInfo>() {
         public boolean isSatisfiedBy(DaemonInfo daemonInfo) {
             return !daemonInfo.isIdle();
         }

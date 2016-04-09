@@ -15,22 +15,22 @@
  */
 package org.gradle.launcher.cli
 
-import org.apache.ivy.Ivy
 import org.apache.tools.ant.Main
 import org.gradle.api.Action
 import org.gradle.cli.CommandLineArgumentException
 import org.gradle.cli.CommandLineParser
 import org.gradle.internal.Factory
 import org.gradle.internal.jvm.Jvm
+import org.gradle.internal.logging.LoggingManagerInternal
+import org.gradle.internal.logging.LoggingServiceRegistry
+import org.gradle.internal.logging.ProgressLoggerFactory
+import org.gradle.internal.logging.StyledTextOutput
+import org.gradle.internal.logging.StyledTextOutputFactory
 import org.gradle.internal.os.OperatingSystem
 import org.gradle.internal.service.ServiceRegistry
 import org.gradle.launcher.bootstrap.ExecutionListener
-import org.gradle.logging.LoggingManagerInternal
-import org.gradle.logging.ProgressLoggerFactory
-import org.gradle.logging.StyledTextOutput
-import org.gradle.logging.StyledTextOutputFactory
-import org.gradle.logging.internal.OutputEventListener
-import org.gradle.logging.internal.StreamingStyledTextOutput
+import org.gradle.internal.logging.internal.OutputEventListener
+import org.gradle.internal.logging.internal.StreamingStyledTextOutput
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.util.GradleVersion
 import org.gradle.util.RedirectStdOutAndErr
@@ -46,13 +46,13 @@ class CommandLineActionFactoryTest extends Specification {
     @Rule
     TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider();
     final ExecutionListener executionListener = Mock()
-    final ServiceRegistry loggingServices = Mock()
+    final LoggingServiceRegistry loggingServices = Mock()
     final LoggingManagerInternal loggingManager = Mock()
     final CommandLineAction actionFactory1 = Mock()
     final CommandLineAction actionFactory2 = Mock()
     final CommandLineActionFactory factory = new CommandLineActionFactory() {
         @Override
-        ServiceRegistry createLoggingServices() {
+        LoggingServiceRegistry createLoggingServices() {
             return loggingServices
         }
 
@@ -77,7 +77,7 @@ class CommandLineActionFactoryTest extends Specification {
     }
 
     def "delegates to each action factory to configure the command-line parser and create the action"() {
-        Action<ExecutionListener> rawAction = Mock()
+        def rawAction = Mock(Runnable)
 
         when:
         def action = factory.convert(["--some-option"])
@@ -92,7 +92,7 @@ class CommandLineActionFactoryTest extends Specification {
         1 * actionFactory1.configureCommandLineParser(!null) >> { CommandLineParser parser -> parser.option("some-option") }
         1 * actionFactory2.configureCommandLineParser(!null)
         1 * actionFactory1.createAction(!null, !null) >> rawAction
-        1 * rawAction.execute(executionListener)
+        1 * rawAction.run()
     }
 
     def "configures logging before parsing command-line"() {
@@ -228,7 +228,6 @@ Revision:     $version.revision
 
 Groovy:       $GroovySystem.version
 Ant:          $Main.antVersion
-Ivy:          ${Ivy.ivyVersion}
 JVM:          ${Jvm.current()}
 OS:           ${OperatingSystem.current()}
 """

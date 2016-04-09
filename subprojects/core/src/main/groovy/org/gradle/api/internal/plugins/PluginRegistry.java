@@ -1,5 +1,5 @@
 /*
- * Copyright 2010 the original author or authors.
+ * Copyright 2014 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,19 +16,27 @@
 
 package org.gradle.api.internal.plugins;
 
-import org.gradle.api.Plugin;
+import net.jcip.annotations.ThreadSafe;
+import org.gradle.api.Nullable;
 import org.gradle.api.internal.initialization.ClassLoaderScope;
-import org.gradle.api.plugins.PluginInstantiationException;
-import org.gradle.api.plugins.UnknownPluginException;
-import org.gradle.internal.reflect.Instantiator;
+import org.gradle.plugin.internal.PluginId;
 
+@ThreadSafe
 public interface PluginRegistry {
-    <T extends Plugin> T loadPlugin(Class<T> pluginClass) throws PluginInstantiationException;
-
-    Class<? extends Plugin> getTypeForId(String pluginId) throws UnknownPluginException, PluginInstantiationException;
+    <T> PluginImplementation<T> inspect(Class<T> clazz);
 
     /**
-     * Creates a child registry which uses the plugins declared in the given script scope.
+     * Extracts plugin information for the given class, if known to this registry.
      */
-    PluginRegistry createChild(ClassLoaderScope lookupScope, Instantiator instantiator);
+    @Nullable
+    <T> PluginImplementation<T> maybeInspect(Class<T> clazz);
+
+    /**
+     * Locates the plugin with the given id. Note that the id of the result may be different to the requested id.
+     */
+    @Nullable
+    PluginImplementation<?> lookup(PluginId pluginId);
+
+    PluginRegistry createChild(ClassLoaderScope lookupScope);
+
 }

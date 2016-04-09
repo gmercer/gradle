@@ -24,12 +24,11 @@ import org.gradle.api.tasks.InputFiles;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.SourceTask;
 import org.gradle.api.tasks.TaskAction;
-import org.gradle.internal.Factory;
 import org.gradle.plugins.javascript.coffeescript.compile.internal.DefaultCoffeeScriptCompileSpec;
 import org.gradle.plugins.javascript.coffeescript.compile.internal.rhino.RhinoCoffeeScriptCompiler;
 import org.gradle.plugins.javascript.rhino.worker.RhinoWorkerHandleFactory;
 import org.gradle.plugins.javascript.rhino.worker.internal.DefaultRhinoWorkerHandleFactory;
-import org.gradle.process.internal.WorkerProcessBuilder;
+import org.gradle.process.internal.worker.WorkerProcessFactory;
 
 import javax.inject.Inject;
 import java.io.File;
@@ -42,7 +41,7 @@ public class CoffeeScriptCompile extends SourceTask {
     private CoffeeScriptCompileOptions options = new CoffeeScriptCompileOptions();
 
     @Inject
-    protected Factory<WorkerProcessBuilder> getWorkerProcessBuilderFactory() {
+    protected WorkerProcessFactory getWorkerProcessBuilderFactory() {
         throw new UnsupportedOperationException();
     }
 
@@ -55,15 +54,6 @@ public class CoffeeScriptCompile extends SourceTask {
         this.coffeeScriptJs = coffeeScriptJs;
     }
 
-    @OutputDirectory
-    public File getDestinationDir() {
-        return getProject().file(destinationDir);
-    }
-
-    public void setDestinationDir(Object destinationDir) {
-        this.destinationDir = destinationDir;
-    }
-
     @InputFiles
     public FileCollection getRhinoClasspath() {
         return getProject().files(rhinoClasspath);
@@ -71,6 +61,15 @@ public class CoffeeScriptCompile extends SourceTask {
 
     public void setRhinoClasspath(Object rhinoClasspath) {
         this.rhinoClasspath = rhinoClasspath;
+    }
+
+    @OutputDirectory
+    public File getDestinationDir() {
+        return getProject().file(destinationDir);
+    }
+
+    public void setDestinationDir(Object destinationDir) {
+        this.destinationDir = destinationDir;
     }
 
     public CoffeeScriptCompileOptions getOptions() {

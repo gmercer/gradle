@@ -20,14 +20,23 @@ import org.gradle.api.Action
 import org.gradle.api.UncheckedIOException
 import org.gradle.api.XmlProvider
 import org.gradle.api.internal.DomNode
-import org.gradle.api.internal.file.FileResolver
-import org.gradle.api.internal.xml.XmlTransformer
+import org.gradle.internal.file.PathToFileResolver
+import org.gradle.internal.reflect.Instantiator
+import org.gradle.internal.xml.XmlTransformer
 import org.gradle.plugins.ear.descriptor.DeploymentDescriptor
 import org.gradle.plugins.ear.descriptor.EarModule
 import org.gradle.plugins.ear.descriptor.EarSecurityRole
 import org.gradle.plugins.ear.descriptor.EarWebModule
+import org.xml.sax.SAXNotRecognizedException
+
+import javax.inject.Inject
 
 class DefaultDeploymentDescriptor implements DeploymentDescriptor {
+
+    //redefine the constant because it's available in XMLConstants only from 1.7 onwards
+    private static final String ACCESS_EXTERNAL_DTD = "http://javax.xml.XMLConstants/property/accessExternalDTD"
+
+    private static final String ALLOW_ANY_EXTERNAL_DTD = "all"
 
     private String fileName = "application.xml"
     String version = "6"
@@ -39,22 +48,14 @@ class DefaultDeploymentDescriptor implements DeploymentDescriptor {
     Set<? extends EarModule> modules = new LinkedHashSet<EarModule>()
     Set<? extends EarSecurityRole> securityRoles = new LinkedHashSet<EarSecurityRole>()
     Map<String, String> moduleTypeMappings = new HashMap<String, String>()
-    private FileResolver fileResolver
+    private PathToFileResolver fileResolver
     final XmlTransformer transformer = new XmlTransformer()
+    private final Instantiator instantiator
 
-    public DefaultDeploymentDescriptor(FileResolver fileResolver) {
-        this(new File("META-INF", "application.xml"), fileResolver)
-    }
-
-    public DefaultDeploymentDescriptor(Object descriptorPath, FileResolver fileResolver) {
+    @Inject
+    public DefaultDeploymentDescriptor(PathToFileResolver fileResolver, Instantiator instantiator) {
+        this.instantiator = instantiator
         this.fileResolver = fileResolver
-        if (fileResolver) {
-            File descriptorFile = fileResolver.resolve(descriptorPath)
-            if (descriptorFile) {
-                fileName = descriptorFile.name
-                readFrom descriptorFile
-            }
-        }
     }
 
     public String getFileName() {
@@ -91,6 +92,13 @@ class DefaultDeploymentDescriptor implements DeploymentDescriptor {
         return this
     }
 
+    public DeploymentDescriptor securityRole(Action<? extends EarSecurityRole> action) {
+        EarSecurityRole role = instantiator.newInstance(DefaultEarSecurityRole)
+        action.execute(role)
+        securityRoles.add(role)
+        return this
+    }
+
     public DeploymentDescriptor withXml(Closure closure) {
         transformer.addAction(closure)
         return this
@@ -119,9 +127,22 @@ class DefaultDeploymentDescriptor implements DeploymentDescriptor {
         }
     }
 
+    private XmlParser createParser() {
+        XmlParser parser = new XmlParser(false, true, true)
+        try {
+            // If not set for >= JAXP 1.5 / Java8 won't allow referencing DTDs, e.g.
+            // using http URLs, because Groovy's XmlParser requests FEATURE_SECURE_PROCESSING
+            parser.setProperty(ACCESS_EXTERNAL_DTD, ALLOW_ANY_EXTERNAL_DTD)
+        } catch (SAXNotRecognizedException ignore) {
+            // property requires >= JAXP 1.5 / Java8
+        }
+        parser
+    }
+
     DeploymentDescriptor readFrom(Reader reader) {
         try {
-            def appNode = new XmlParser().parse(reader)
+            def appNode = createParser().parse(reader)
+
             version = appNode.@version
 
             appNode.children().each { child ->
@@ -175,7 +196,7 @@ class DefaultDeploymentDescriptor implements DeploymentDescriptor {
         return this
     }
 
-    private String localNameOf(Node node) {
+    protected String localNameOf(Node node) {
         node.name() instanceof QName ? node.name().localPart : node.name() as String
     }
 

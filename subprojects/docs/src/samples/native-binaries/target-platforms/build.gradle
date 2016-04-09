@@ -39,24 +39,11 @@ model {
             architecture "sparc"
         }
     }
-}
-// END SNIPPET targetplatforms
-model {
-    toolChains {
-        all{
-            target("arm"){
-                cppCompiler.withArguments { args ->
-                    args << "-m32"
-                }
-                linker.withArguments { args ->
-                    args << "-m32"
-                }
-            }
-            target("sparc")
+    components {
+        main(NativeExecutableSpec) {
+            targetPlatform "arm"
+            targetPlatform "sparc"
         }
     }
 }
-
-nativeExecutables {
-    main {}
-}
+// END SNIPPET targetplatforms

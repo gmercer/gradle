@@ -17,6 +17,7 @@
 package org.gradle
 
 import org.gradle.api.logging.LogLevel
+import org.gradle.internal.DefaultTaskExecutionRequest
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.util.SetSystemProperties
 import org.junit.Rule
@@ -41,7 +42,6 @@ class StartParameterTest extends Specification {
         parameter.systemPropertiesArgs = [b: 'b']
         parameter.gradleUserHomeDir = new File('b')
         parameter.initScripts = [new File('init script'), new File("/path/to/another init script")]
-        parameter.cacheUsage = CacheUsage.ON
         parameter.logLevel = LogLevel.WARN
         parameter.colorOutput = false
         parameter.continueOnFailure = true
@@ -102,12 +102,12 @@ class StartParameterTest extends Specification {
         parameter.logLevel == LogLevel.LIFECYCLE
         parameter.colorOutput
         parameter.taskNames.empty
+        parameter.taskRequests.empty
         parameter.excludedTaskNames.empty
         parameter.projectProperties.isEmpty()
         parameter.systemPropertiesArgs.isEmpty()
         !parameter.dryRun
         !parameter.continueOnFailure
-        parameter.refreshOptions == RefreshOptions.NONE
         !parameter.rerunTasks
         !parameter.recompileScripts
         !parameter.refreshDependencies
@@ -256,10 +256,10 @@ class StartParameterTest extends Specification {
 
         // Copied properties
         parameter.gradleUserHomeDir = new File("home")
-        parameter.cacheUsage = CacheUsage.REBUILD
         parameter.logLevel = LogLevel.DEBUG
         parameter.colorOutput = false
         parameter.configureOnDemand = true
+        parameter.systemPropertiesArgs.put("testprop", "foo")
 
         // Non-copied
         parameter.currentDir = new File("other")
@@ -283,22 +283,23 @@ class StartParameterTest extends Specification {
 
         newParameter.configureOnDemand == parameter.configureOnDemand
         newParameter.gradleUserHomeDir == parameter.gradleUserHomeDir
-        newParameter.cacheUsage == parameter.cacheUsage
         newParameter.logLevel == parameter.logLevel
         newParameter.colorOutput == parameter.colorOutput
         newParameter.continueOnFailure == parameter.continueOnFailure
         newParameter.refreshDependencies == parameter.refreshDependencies
         newParameter.rerunTasks == parameter.rerunTasks
         newParameter.recompileScripts == parameter.recompileScripts
+        newParameter.systemPropertiesArgs == parameter.systemPropertiesArgs
 
         newParameter.buildFile == null
+        newParameter.taskRequests.empty
         newParameter.taskNames.empty
         newParameter.excludedTaskNames.empty
         newParameter.currentDir == new File(System.getProperty("user.dir")).getCanonicalFile()
         !newParameter.dryRun
         assertThat(newParameter, isSerializable())
     }
-    
+
     void "gets all init scripts"() {
         def gradleUserHomeDir = tmpDir.testDirectory.createDir("gradleUserHomeDie")
         def gradleHomeDir = tmpDir.testDirectory.createDir("gradleHomeDir")
@@ -329,5 +330,52 @@ class StartParameterTest extends Specification {
 
         then:
         parameter.allInitScripts == [userMainInit, userInit1, userInit2, distroInit1, distroInit2]
+    }
+
+    def 'taskNames getter defaults to taskParameters'() {
+        def parameter = new StartParameter()
+        def requests = [new DefaultTaskExecutionRequest(['a']), new DefaultTaskExecutionRequest(['b'])]
+
+        when:
+        parameter.taskRequests = requests
+
+        then:
+        parameter.taskNames == [ 'a', 'b' ]
+        parameter.taskRequests == requests
+    }
+
+    def 'taskNames setter defaults to taskParameters'() {
+        StartParameter parameter = new StartParameter()
+
+        when:
+        parameter.taskNames = [ 'a', 'b' ]
+
+        then:
+        parameter.taskNames == [ 'a', 'b' ]
+        parameter.taskRequests == [ new DefaultTaskExecutionRequest(['a', 'b']) ]
+
+        when:
+        parameter.taskNames = null
+
+        then:
+        parameter.taskNames == []
+        parameter.taskRequests == []
+    }
+
+
+    def 'parallel project execution linked to number of parallel threads'() {
+        StartParameter parameter = new StartParameter()
+
+        when:
+        parameter.parallelThreadCount = 10
+
+        then:
+        parameter.parallelProjectExecutionEnabled
+
+        when:
+        parameter.parallelProjectExecutionEnabled = false
+
+        then:
+        parameter.parallelThreadCount == 0
     }
 }

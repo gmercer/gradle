@@ -113,7 +113,7 @@ None, except faster builds for those using snapshots.
 When Gradle crashes after writing to a `FileStore` implementation, it can leave a partially written file behind. Subsequent invocations of Gradle
 will attempt to use this partial file.
 
-See [GRADLE-2457](http://issues.gradle.org/browse/GRADLE-2457)
+See [GRADLE-2457](https://issues.gradle.org/browse/GRADLE-2457)
 
 ### Test coverage
 
@@ -143,7 +143,7 @@ Something like this:
 
 # Ignore cached missing module entry when module is missing for all repositories
 
-See [GRADLE-2455](http://issues.gradle.org/browse/GRADLE-2455)
+See [GRADLE-2455](https://issues.gradle.org/browse/GRADLE-2455)
 
 Currently, we cache the fact that a module is missing from a given repository. This is to avoid a remote lookup when a resolution uses multiple repositories,
 and a given module is not hosted in every repository.
@@ -180,7 +180,7 @@ When resolving a dependency descriptor in `UserResolverChain` for a particular r
 SHA-1 checksums should be 40 hex characters long. When publishing, Gradle generates a checksum string that does not include leading zeros, so
 that sometimes the checksum is shorter than 40 characters.
 
-See [GRADLE-2456](http://issues.gradle.org/browse/GRADLE-2456)
+See [GRADLE-2456](https://issues.gradle.org/browse/GRADLE-2456)
 
 ### Test coverage
 
@@ -195,7 +195,7 @@ See [GRADLE-2456](http://issues.gradle.org/browse/GRADLE-2456)
 
 # Errors writing cached module descriptor are silently ignored
 
-See [GRADLE-2458](http://issues.gradle.org/browse/GRADLE-2458)
+See [GRADLE-2458](https://issues.gradle.org/browse/GRADLE-2458)
 
 ### Test coverage
 
@@ -209,7 +209,7 @@ No specific coverage at this point, other than unit testing.
 
 # Honor SSL system properties when accessing HTTP repositories
 
-See [GRADLE-2234](http://issues.gradle.org/browse/GRADLE-2234)
+See [GRADLE-2234](https://issues.gradle.org/browse/GRADLE-2234)
 
 ### Test coverage
 
@@ -341,7 +341,7 @@ implementations will be pluggable in the future, so you could combine maven-meta
 
 # GRADLE-2861 Handle parent pom with unknown placeholders (DONE)
 
-See [GRADLE-2861](http://issues.gradle.org/browse/GRADLE-2861)
+See [GRADLE-2861](https://issues.gradle.org/browse/GRADLE-2861)
 
 Currently, the POM parser (inherited from Ivy) attaches special extra attributes to the `ModuleDescriptor` for a POM. These are later used by the POM parser
 when it parses a child POM. Sometimes these attributes cause badly formed XML to be generated, hence the failure listed in the jira issue.
@@ -367,7 +367,7 @@ The solution is to have the parser request the parent POM artifact directly, rat
 
 # Latest status dynamic versions work across multiple repositories (DONE)
 
-See [GRADLE-2502](http://issues.gradle.org/browse/GRADLE-2502)
+See [GRADLE-2502](https://issues.gradle.org/browse/GRADLE-2502)
 
 ### Test coverage
 
@@ -483,3 +483,151 @@ artifact model. This will be a small step toward an independent Gradle model of 
 
 * GRADLE-2034: Existence of pom file requires that declared artifacts can be found in the same repository
 * GRADLE-2369: Dependency resolution fails for mavenLocal(), mavenCentral() if artifact partially in mavenLocal()
+
+# Ivy global exclude that provides "artifact" attribute doesn't exclude artifact correctly
+
+* [GRADLE-3147](https://issues.gradle.org/browse/GRADLE-3147)
+* Implement filtering in `DependencyGraphBuilder.DependencyEdge.getArtifacts()`.
+* Extend existing tests by verifying module vs. artifact excludes, declared both globally and for a particular dependency.
+
+## Possible scenarios
+
+The following scenarios assume the following dependency declaration in a Gradle build script that target an Ivy repository:
+
+    dependencies {
+        compile "org.gradle.test:a:1.0"
+    }
+
+The published `ivy.xml` for the requested module looks as such:
+
+    <ivy-module>
+        ...
+        <dependencies>
+            <dependency org="org.gradle.test" name="b" rev="1.0"/>
+            <dependency org="org.gradle.test" name="c" rev="1.0"/>
+            <exclude artifact="b"/>
+        </dependencies>
+        ...
+    </ivy-module>
+
+The presented `exclude` rule is only an example. It may change per scenario as outlined below.
+
+## General assumptions
+
+* The main artifact has the type `jar`.
+* The source artifact has the type `source`.
+* The javadoc artifact has the type `javadoc`.
+
+### Single artifact, no transitive dependencies
+
+#### Assumptions
+
+* Dependency graph
+    * `a` -> `b`, `c`
+* `b` only has a single artifact: `b-1.0.jar`
+* `c` only has a single artifact: `c-1.0.jar`
+
+#### Test cases
+
+* Excluding the artifact `b` will only exclude the artifact `b-1.0.jar` but not its module. The modules `a`, `c` and all their artifacts will be part of the resolved dependencies.
+
+The result is to be expected if the exclude has the following attribute combinations:
+
+* `<exclude artifact="b"/>`
+* `<exclude artifact="b" type="jar"/>`
+* `<exclude artifact="b" ext="jar"/>`
+* `<exclude artifact="b" type="jar" ext="jar"/>`
+* `<exclude org="org.gradle.test" artifact="b"/>`
+* `<exclude org="org.gradle.test" artifact="b" type="jar"/>`
+* `<exclude org="org.gradle.test" artifact="b" type="jar" ext="jar"/>`
+* `<exclude org="org.gradle.test" module="b" artifact="b"/>`
+* `<exclude org="org.gradle.test" module="b" artifact="b" type="jar"/>`
+* `<exclude org="org.gradle.test" module="b" artifact="b" type="jar" ext="jar"/>`
+
+### Multiple artifacts, no transitive dependencies
+
+#### Assumptions
+
+* Dependency graph
+    * `a` -> `b`, `c`
+* `b` has a multiple artifacts: `b-1.0.jar`, `b-1.0-src.jar`, `b-1.0-javadoc.jar`
+* `c` has a multiple artifacts: `c-1.0.jar`, `c-1.0-src.jar`, `c-1.0-javadoc.jar`
+
+#### Test cases
+
+* Excluding the artifact `b` will only exclude the artifact `b-1.0.jar` but not its module. `b-1.0-src.jar` and `b-1.0-javadoc.jar` will still be resolved. The modules `a`, `c` and all their artifacts
+will be part of the resolved dependencies.
+
+The result is to be expected if the exclude has the following attribute combinations:
+
+* `<exclude artifact="b"/>`
+* `<exclude artifact="b" type="jar"/>`
+* `<exclude artifact="b" ext="jar"/>`
+* `<exclude artifact="b" type="jar" ext="jar"/>`
+* `<exclude org="org.gradle.test" artifact="b"/>`
+* `<exclude org="org.gradle.test" artifact="b" type="jar"/>`
+* `<exclude org="org.gradle.test" artifact="b" type="jar" ext="jar"/>`
+* `<exclude org="org.gradle.test" module="b" artifact="b"/>`
+* `<exclude org="org.gradle.test" module="b" artifact="b" type="jar"/>`
+* `<exclude org="org.gradle.test" module="b" artifact="b" type="jar" ext="jar"/>`
+
+### Multiple artifacts, transitive dependencies, exclusion of top-level artifact
+
+#### Assumptions
+
+* Dependency graph:
+    * `a` -> `b`, `c`
+    * `b` -> `d`
+    * `c` -> `e`
+* `b` has a multiple artifacts: `b-1.0.jar`, `b-1.0-src.jar`, `b-1.0-javadoc.jar`
+* `c` has a multiple artifacts: `c-1.0.jar`, `c-1.0-src.jar`, `c-1.0-javadoc.jar`
+* `d` only has a single artifact: `d-1.0.jar`
+* `e` only has a single artifact: `e-1.0.jar`
+
+#### Test cases
+
+* Excluding the artifact `b` will only exclude the artifact `b-1.0.jar` but not its module. `b-1.0-src.jar` and `b-1.0-javadoc.jar` will still be resolved. The modules `a`, `c`, `d`, `e` and all their
+artifacts will be part of the resolved dependencies.
+
+The result is to be expected if the exclude has the following attribute combinations:
+
+* `<exclude artifact="b"/>`
+* `<exclude artifact="b" type="jar"/>`
+* `<exclude artifact="b" ext="jar"/>`
+* `<exclude artifact="b" type="jar" ext="jar"/>`
+* `<exclude org="org.gradle.test" artifact="b"/>`
+* `<exclude org="org.gradle.test" artifact="b" type="jar"/>`
+* `<exclude org="org.gradle.test" artifact="b" type="jar" ext="jar"/>`
+* `<exclude org="org.gradle.test" module="b" artifact="b"/>`
+* `<exclude org="org.gradle.test" module="b" artifact="b" type="jar"/>`
+* `<exclude org="org.gradle.test" module="b" artifact="b" type="jar" ext="jar"/>`
+
+### Multiple artifacts, transitive dependency required by multiple modules
+
+#### Assumptions
+
+* Dependency graph:
+    * `a` -> `b`, `c`
+    * `b` -> `d`
+    * `c` -> `d`
+* `b` has a multiple artifacts: `b-1.0.jar`, `b-1.0-src.jar`, `b-1.0-javadoc.jar`
+* `c` has a multiple artifacts: `c-1.0.jar`, `c-1.0-src.jar`, `c-1.0-javadoc.jar`
+* `d` has a multiple artifacts: `d-1.0.jar`, `d-1.0-src.jar`, `d-1.0-javadoc.jar`
+
+#### Test cases
+
+* Excluding the artifact `d` will only exclude the artifact `d-1.0.jar` but not its module. `d-1.0-src.jar` and `d-1.0-javadoc.jar` will still be resolved. The modules `a`, `b`, `c` and all their
+artifacts will be part of the resolved dependencies.
+
+The result is to be expected if the exclude has the following attribute combinations:
+
+* `<exclude artifact="d"/>`
+* `<exclude artifact="d" type="jar"/>`
+* `<exclude artifact="d" ext="jar"/>`
+* `<exclude artifact="d" type="jar" ext="jar"/>`
+* `<exclude org="org.gradle.test" artifact="d"/>`
+* `<exclude org="org.gradle.test" artifact="d" type="jar"/>`
+* `<exclude org="org.gradle.test" artifact="d" type="jar" ext="jar"/>`
+* `<exclude org="org.gradle.test" module="d" artifact="d"/>`
+* `<exclude org="org.gradle.test" module="d" artifact="d" type="jar"/>`
+* `<exclude org="org.gradle.test" module="d" artifact="d" type="jar" ext="jar"/>`

@@ -16,13 +16,28 @@
 
 package org.gradle.api.internal.changedetection.changes;
 
+import com.google.common.collect.Sets;
 import org.gradle.api.Action;
-import org.gradle.api.tasks.incremental.IncrementalTaskInputs;
+import org.gradle.api.internal.changedetection.state.FilesSnapshotSet;
 import org.gradle.api.tasks.incremental.InputFileDetails;
 
-abstract class StatefulIncrementalTaskInputs implements IncrementalTaskInputs {
+import java.io.File;
+import java.util.Set;
+
+abstract class StatefulIncrementalTaskInputs implements IncrementalTaskInputsInternal {
+    private final FilesSnapshotSet inputFilesSnapshot;
+    private final Set<File> discoveredInputs;
     private boolean outOfDateProcessed;
     private boolean removedProcessed;
+
+    protected StatefulIncrementalTaskInputs(FilesSnapshotSet inputFilesSnapshot) {
+        this.inputFilesSnapshot = inputFilesSnapshot;
+        this.discoveredInputs = Sets.newHashSet();
+    }
+
+    public FilesSnapshotSet getInputFilesSnapshot() {
+        return inputFilesSnapshot;
+    }
 
     public void outOfDate(final Action<? super InputFileDetails> outOfDateAction) {
         if (outOfDateProcessed) {
@@ -46,4 +61,14 @@ abstract class StatefulIncrementalTaskInputs implements IncrementalTaskInputs {
     }
 
     protected abstract void doRemoved(Action<? super InputFileDetails> removedAction);
+
+    @Override
+    public void newInput(File discoveredInput) {
+        discoveredInputs.add(discoveredInput);
+    }
+
+    @Override
+    public Set<File> getDiscoveredInputs() {
+        return discoveredInputs;
+    }
 }

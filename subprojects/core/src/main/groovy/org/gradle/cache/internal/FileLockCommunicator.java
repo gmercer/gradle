@@ -16,7 +16,7 @@
 
 package org.gradle.cache.internal;
 
-import org.gradle.messaging.remote.internal.inet.InetAddressFactory;
+import org.gradle.internal.remote.internal.inet.InetAddressFactory;
 
 import java.io.*;
 import java.net.DatagramPacket;
@@ -35,7 +35,7 @@ public class FileLockCommunicator {
     public FileLockCommunicator(InetAddressFactory addressFactory) {
         this.addressFactory = addressFactory;
         try {
-            socket = new DatagramSocket();
+            socket = new DatagramSocket(0, addressFactory.findLocalBindingAddress());
         } catch (SocketException e) {
             throw throwAsUncheckedException(e);
         }

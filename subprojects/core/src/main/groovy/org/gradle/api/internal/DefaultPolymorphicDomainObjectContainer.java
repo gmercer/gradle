@@ -15,62 +15,57 @@
  */
 package org.gradle.api.internal;
 
-import com.google.common.base.Joiner;
-import com.google.common.collect.Lists;
 import groovy.lang.Closure;
 import org.gradle.api.*;
+import org.gradle.internal.Cast;
 import org.gradle.internal.reflect.Instantiator;
+import org.gradle.model.internal.core.NamedEntityInstantiator;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.Set;
 
 public class DefaultPolymorphicDomainObjectContainer<T> extends AbstractPolymorphicDomainObjectContainer<T>
         implements ExtensiblePolymorphicDomainObjectContainer<T> {
-    @Nullable
-    private NamedDomainObjectFactory<? extends T> defaultFactory;
-
-    private final Map<Class<?>, NamedDomainObjectFactory<?>> factories =
-            new HashMap<Class<?>, NamedDomainObjectFactory<?>>();
+    protected final DefaultPolymorphicNamedEntityInstantiator<T> namedEntityInstantiator;
 
     public DefaultPolymorphicDomainObjectContainer(Class<T> type, Instantiator instantiator, Namer<? super T> namer) {
         super(type, instantiator, namer);
+        namedEntityInstantiator = new DefaultPolymorphicNamedEntityInstantiator<T>(type, "this container");
     }
 
     public DefaultPolymorphicDomainObjectContainer(Class<T> type, Instantiator instantiator) {
         this(type, instantiator, Named.Namer.forType(type));
     }
 
+    @Override
+    public NamedEntityInstantiator<T> getEntityInstantiator() {
+        return namedEntityInstantiator;
+    }
+
     protected T doCreate(String name) {
-        if (defaultFactory == null) {
-            throw new InvalidUserDataException(String.format("Cannot create a %s named '%s' because this container "
-                    + "does not support creating elements by name alone. Please specify which subtype of %s to create. "
-                    + "Known subtypes are: %s", getTypeDisplayName(), name, getTypeDisplayName(), getSupportedTypeNames()));
+        try {
+            return namedEntityInstantiator.create(name, getType());
+        } catch (InvalidUserDataException e) {
+            if (e.getCause() instanceof NoFactoryRegisteredForTypeException) {
+                throw new InvalidUserDataException(String.format("Cannot create a %s named '%s' because this container "
+                        + "does not support creating elements by name alone. Please specify which subtype of %s to create. "
+                        + "Known subtypes are: %s", getTypeDisplayName(), name, getTypeDisplayName(), namedEntityInstantiator.getSupportedTypeNames()));
+            } else {
+                throw e;
+            }
         }
-        return defaultFactory.create(name);
     }
 
     protected <U extends T> U doCreate(String name, Class<U> type) {
-        @SuppressWarnings("unchecked")
-        NamedDomainObjectFactory<U> factory = (NamedDomainObjectFactory<U>) factories.get(type);
-        if (factory == null) {
-            throw new InvalidUserDataException(String.format("Cannot create a %s because this type is not known "
-                    + "to this container. Known types are: %s", type.getSimpleName(), getSupportedTypeNames()));
-        }
-        return factory.create(name);
+        return namedEntityInstantiator.create(name, type);
     }
 
-    public void registerDefaultFactory(NamedDomainObjectFactory<? extends T> factory) {
-        defaultFactory = factory;
+    public <U extends T> void registerDefaultFactory(NamedDomainObjectFactory<U> factory) {
+        Class<T> castType = Cast.uncheckedCast(getType());
+        registerFactory(castType, factory);
     }
 
     public <U extends T> void registerFactory(Class<U> type, NamedDomainObjectFactory<? extends U> factory) {
-        if (!getType().isAssignableFrom(type)) {
-            throw new IllegalArgumentException(String.format("Cannot register a factory for type %s because "
-                    + "it is not a subtype of container element type %s.", type.getSimpleName(), getTypeDisplayName()));
-        }
-        factories.put(type, factory);
+        namedEntityInstantiator.registerFactory(type, factory);
     }
 
     public <U extends T> void registerFactory(Class<U> type, final Closure<? extends U> factory) {
@@ -91,12 +86,7 @@ public class DefaultPolymorphicDomainObjectContainer<T> extends AbstractPolymorp
         });
     }
 
-    private String getSupportedTypeNames() {
-        List<String> names = Lists.newArrayList();
-        for (Class<?> clazz : factories.keySet()) {
-            names.add(clazz.getSimpleName());
-        }
-        Collections.sort(names);
-        return names.isEmpty() ? "(None)" : Joiner.on(", ").join(names);
+    public Set<? extends Class<? extends T>> getCreateableTypes() {
+        return namedEntityInstantiator.getCreatableTypes();
     }
 }

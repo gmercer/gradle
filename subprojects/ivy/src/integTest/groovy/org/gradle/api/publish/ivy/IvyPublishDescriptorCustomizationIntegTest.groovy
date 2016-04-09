@@ -16,10 +16,14 @@
 
 package org.gradle.api.publish.ivy
 
-import org.gradle.integtests.fixtures.AbstractIntegrationSpec
+import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
+import spock.lang.IgnoreIf
+import spock.lang.Unroll
+
+import javax.xml.namespace.QName
 import org.gradle.test.fixtures.ivy.IvyDescriptor
 
-class IvyPublishDescriptorCustomizationIntegTest extends AbstractIntegrationSpec {
+class IvyPublishDescriptorCustomizationIntegTest extends AbstractIvyPublishIntegTest {
 
     def module = ivyRepo.module("org.gradle", "publish", "2")
 
@@ -48,6 +52,7 @@ class IvyPublishDescriptorCustomizationIntegTest extends AbstractIntegrationSpec
         """
     }
 
+    @IgnoreIf({GradleContextualExecuter.parallel})
     def "can customize descriptor xml during publication"() {
         when:
         succeeds 'publish'
@@ -65,8 +70,11 @@ class IvyPublishDescriptorCustomizationIntegTest extends AbstractIntegrationSpec
                     ivy {
                         descriptor {
                             status "custom-status"
+                            branch "custom-branch"
+                            extraInfo 'http://my.extra.info1', 'foo', 'fooValue'
+                            extraInfo 'http://my.extra.info2', 'bar', 'barValue'
                             withXml {
-                                asNode().info[0].appendNode('description', 'Customized descriptor')
+                                asNode().info[0].@resolver = 'test'
                             }
                         }
                     }
@@ -80,8 +88,12 @@ class IvyPublishDescriptorCustomizationIntegTest extends AbstractIntegrationSpec
         ":jar" in skippedTasks
 
         and:
-        module.parsedIvy.description == "Customized descriptor"
+        module.parsedIvy.resolver == "test"
         module.parsedIvy.status == "custom-status"
+        module.parsedIvy.branch == "custom-branch"
+        module.parsedIvy.extraInfo.size() == 2
+        module.parsedIvy.extraInfo[new QName('http://my.extra.info1', 'foo')] == 'fooValue'
+        module.parsedIvy.extraInfo[new QName('http://my.extra.info2', 'bar')] == 'barValue'
     }
 
     def "can generate ivy.xml without publishing"() {
@@ -147,5 +159,64 @@ class IvyPublishDescriptorCustomizationIntegTest extends AbstractIntegrationSpec
         failure.assertHasDescription("Execution failed for task ':publishIvyPublicationToIvyRepository'.")
         failure.assertHasCause("Failed to publish publication 'ivy' to repository 'ivy'")
         failure.assertHasCause("Invalid publication 'ivy': supplied revision does not match ivy descriptor (cannot edit revision directly in the ivy descriptor file).")
+    }
+
+    @Unroll
+    def "produces sensible error with invalid extra info elements" () {
+        buildFile << """
+            publishing {
+                publications {
+                    ivy {
+                        descriptor {
+                            extraInfo 'http://my.extra.info', '${sq(name)}', 'fooValue'
+                        }
+                    }
+                }
+            }
+        """
+
+        when:
+        fails 'publish'
+
+        then:
+        failure.assertHasDescription("A problem occurred configuring root project 'publish'.")
+        failure.assertHasCause("Exception thrown while executing model rule: PublishingPlugin.Rules#publishing")
+        failure.assertHasCause("Invalid ivy extra info element name: '${name}'")
+
+        where:
+        name        | _
+        ''          | _
+        'foo\\n'    | _
+        'foo<'      | _
+        '1foo'      | _
+     }
+
+    @Unroll
+    def "produces sensible error with extra info containing null values" () {
+        buildFile << """
+            publishing {
+                publications {
+                    ivy {
+                        descriptor {
+                            extraInfo ${namespace}, ${name}, 'fooValue'
+                        }
+                    }
+                }
+            }
+        """
+
+        when:
+        fails 'publish'
+
+        then:
+        failure.assertHasDescription("A problem occurred configuring root project 'publish'.")
+        failure.assertHasFileName("Build file '${buildFile}'")
+        failure.assertHasLineNumber(23)
+        failure.assertHasCause("Cannot add an extra info element with null ")
+
+        where:
+        namespace                | name
+        null                     | "'foo'"
+        "'http://my.extra.info'" | null
     }
 }

@@ -18,6 +18,7 @@ package org.gradle.api.plugins
 import org.gradle.api.JavaVersion
 import org.gradle.api.file.SourceDirectorySet
 import org.gradle.api.internal.file.FileLookup
+import org.gradle.api.internal.file.SourceDirectorySetFactory
 import org.gradle.api.internal.project.ProjectInternal
 import org.gradle.api.internal.tasks.DefaultSourceSetContainer
 import org.gradle.api.java.archives.Manifest
@@ -29,7 +30,7 @@ import org.gradle.internal.reflect.Instantiator
 import org.gradle.util.ConfigureUtil
 
 /**
- * Is mixed in into the project when applying the {@link org.gradle.api.plugins.JavaBasePlugin} or the
+ * Is mixed into the project when applying the {@link org.gradle.api.plugins.JavaBasePlugin} or the
  * {@link org.gradle.api.plugins.JavaPlugin}.
  */
 class JavaPluginConvention {
@@ -48,7 +49,7 @@ class JavaPluginConvention {
     String testResultsDirName
 
     /**
-     * The name of the test reports directory. Can be a name or a path relative to the build dir.
+     * The name of the test reports directory. Can be a name or a path relative to {@link org.gradle.api.reporting.ReportingExtension#getBaseDir}.
      */
     String testReportDirName
 
@@ -60,27 +61,13 @@ class JavaPluginConvention {
     private JavaVersion srcCompat
     private JavaVersion targetCompat
 
-    /**
-     * Deprecated. Please use jar.metaInf instead. The property didn't add much value over the jar's setting
-     * and Gradle offers convenient ways of configuring all tasks of given type should someone needed.
-     * <p>
-     * The lines of metaInf file that will be configured by default to every jar task.
-     */
-    @Deprecated
-    List metaInf
-
-    @Deprecated
-    DefaultManifest manifest
-
     JavaPluginConvention(ProjectInternal project, Instantiator instantiator) {
         this.project = project
-        sourceSets = instantiator.newInstance(DefaultSourceSetContainer.class, project.fileResolver, project.tasks, instantiator)
+        sourceSets = instantiator.newInstance(DefaultSourceSetContainer.class, project.fileResolver, project.tasks, instantiator, project.services.get(SourceDirectorySetFactory))
         dependencyCacheDirName = 'dependency-cache'
         docsDirName = 'docs'
         testResultsDirName = 'test-results'
         testReportDirName = 'tests'
-        manifest = manifest();
-        metaInf = []
     }
 
     /**

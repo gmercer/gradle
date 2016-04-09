@@ -18,23 +18,19 @@ package org.gradle.launcher
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 import org.gradle.integtests.fixtures.AvailableJavaHomes
-import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
+import org.gradle.internal.jvm.JavaInfo
 import org.gradle.internal.jvm.Jvm
+import org.gradle.test.fixtures.file.LeaksFileHandles
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
 import org.gradle.util.TextUtil
 import spock.lang.IgnoreIf
 
-@IgnoreIf( { GradleContextualExecuter.embedded })
+@LeaksFileHandles
 class GradleConfigurabilityIntegrationSpec extends AbstractIntegrationSpec {
-
-    def setup() {
-        executer.requireIsolatedDaemons()
-    }
-
     def buildSucceeds(String script) {
         file('build.gradle') << script
-        executer.withArguments("--info").withNoDefaultJvmArgs().run()
+        executer.withArguments("--info").useDefaultBuildJvmArgs().run()
     }
 
     def "honours jvm args specified in gradle.properties"() {
@@ -48,13 +44,27 @@ assert java.lang.management.ManagementFactory.runtimeMXBean.inputArguments.conta
         """
     }
 
+    def "shows decent message when awkward java home used"() {
+        def dummyJdk = file("dummyJdk").createDir()
+        assert dummyJdk.isDirectory()
+
+        when:
+        file("gradle.properties").writeProperties(["org.gradle.java.home": dummyJdk.absolutePath])
+
+        then:
+        fails()
+
+        and:
+        failure.assertHasDescription("Java home supplied via 'org.gradle.java.home' seems to be invalid: ${dummyJdk.absolutePath}")
+    }
+
     @Requires(TestPrecondition.SYMLINKS)
-    def "connects to the daemon if java home is a symlink"() {
+    def "handles java home that is a symlink"() {
         given:
         def javaHome = Jvm.current().javaHome
         def javaLink = file("javaLink")
         javaLink.createLink(javaHome)
-        file("tmp").deleteDir().createDir()
+        file("tmp").createDir().deleteDir()
 
         String linkPath = TextUtil.escapeString(javaLink.absolutePath)
         file("gradle.properties") << "org.gradle.java.home=$linkPath"
@@ -91,28 +101,26 @@ assert inputArgs.find { it.contains('-XX:HeapDumpPath=') }
 """
     }
 
-    def String useAlternativeJavaPath() {
-        File javaHome = AvailableJavaHomes.bestAlternative
-        String javaPath = TextUtil.escapeString(javaHome.canonicalPath)
-        file("gradle.properties") << "org.gradle.java.home=$javaPath"
-
-        return javaPath
+    def String useAlternativeJavaPath(JavaInfo jvm = AvailableJavaHomes.differentJdk) {
+        File javaHome = jvm.javaHome
+        file("gradle.properties").writeProperties("org.gradle.java.home": javaHome.canonicalPath)
+        return javaHome.canonicalPath
     }
 
-    @IgnoreIf({ AvailableJavaHomes.bestAlternative == null })
+    @IgnoreIf({ AvailableJavaHomes.differentJdk == null })
     def "honours java home specified in gradle.properties"() {
         given:
         String javaPath = useAlternativeJavaPath()
 
         expect:
-        buildSucceeds "assert System.getProperty('java.home').startsWith('$javaPath')"
+        buildSucceeds "assert System.getProperty('java.home').startsWith('${TextUtil.escapeString(javaPath)}')"
     }
 
-    @IgnoreIf({ AvailableJavaHomes.bestAlternative == null || System.getProperty('java.runtime.version') == null})
+    @IgnoreIf({ AvailableJavaHomes.differentVersion == null || System.getProperty('java.runtime.version') == null})
     def "does not alter java.runtime.version"() {
         given:
 
-        useAlternativeJavaPath()
+        useAlternativeJavaPath(AvailableJavaHomes.differentVersion)
         String javaRuntimeVersion = System.getProperty('java.runtime.version')
 
         expect:

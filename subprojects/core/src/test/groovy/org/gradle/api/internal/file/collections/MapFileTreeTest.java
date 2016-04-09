@@ -15,21 +15,27 @@
  */
 package org.gradle.api.internal.file.collections;
 
-import groovy.lang.Closure;
+import org.gradle.api.Action;
+import org.gradle.api.UncheckedIOException;
 import org.gradle.api.internal.file.TestFiles;
 import org.gradle.test.fixtures.file.TestFile;
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider;
-import org.gradle.util.TestUtil;
 import org.junit.Rule;
 import org.junit.Test;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.gradle.api.file.FileVisitorUtil.assertCanStopVisiting;
 import static org.gradle.api.file.FileVisitorUtil.assertVisits;
 import static org.gradle.api.tasks.AntBuilderAwareUtil.assertSetContainsForAllTypes;
 import static org.gradle.util.WrapUtil.toList;
 import static org.hamcrest.Matchers.equalTo;
+import static org.junit.Assert.*;
 
 public class MapFileTreeTest {
     @Rule
@@ -43,11 +49,11 @@ public class MapFileTreeTest {
         assertVisits(tree, emptyList, emptyList);
         assertSetContainsForAllTypes(tree, emptyList);
     }
-    
+
     @Test
     public void canAddAnElementUsingAClosureToGeneratedContent() {
-        Closure closure = TestUtil.toClosure("{it.write('content'.getBytes())}");
-        tree.add("path/file.txt", closure);
+        Action<OutputStream> action = getAction();
+        tree.add("path/file.txt", action);
 
         assertVisits(tree, toList("path/file.txt"), toList("path"));
         assertSetContainsForAllTypes(tree, toList("path/file.txt"));
@@ -58,10 +64,10 @@ public class MapFileTreeTest {
 
     @Test
     public void canAddMultipleElementsInDifferentDirs() {
-        Closure closure = TestUtil.toClosure("{it.write('content'.getBytes())}");
-        tree.add("path/file.txt", closure);
-        tree.add("file.txt", closure);
-        tree.add("path/subdir/file.txt", closure);
+        Action<OutputStream> action = getAction();
+        tree.add("path/file.txt", action);
+        tree.add("file.txt", action);
+        tree.add("path/subdir/file.txt", action);
 
         assertVisits(tree, toList("path/file.txt", "file.txt", "path/subdir/file.txt"), toList("path", "path/subdir"));
         assertSetContainsForAllTypes(tree, toList("path/file.txt", "file.txt", "path/subdir/file.txt"));
@@ -69,9 +75,95 @@ public class MapFileTreeTest {
 
     @Test
     public void canStopVisitingElements() {
-        Closure closure = TestUtil.toClosure("{it.write('content'.getBytes())}");
+        Action<OutputStream> closure = getAction();
         tree.add("path/file.txt", closure);
         tree.add("file.txt", closure);
         assertCanStopVisiting(tree);
+    }
+
+    @Test
+    public void containsWontCreateFiles() {
+        final AtomicInteger callCounter = new AtomicInteger(0);
+        Action<OutputStream> fileAction = new Action<OutputStream>() {
+            @Override
+            public void execute(OutputStream outputStream) {
+                callCounter.incrementAndGet();
+            }
+        };
+        tree.add("file.txt", fileAction);
+
+        FileTreeAdapter fileTreeAdapter = new FileTreeAdapter(tree);
+        File file = rootDir.file("file.txt");
+
+        assertTrue(fileTreeAdapter.contains(file));
+        assertTrue(fileTreeAdapter.contains(file));
+        assertFalse(fileTreeAdapter.contains(rootDir.file("file2.txt")));
+
+        assertEquals(0, callCounter.get());
+    }
+
+    @Test
+    public void doesNotOverwriteFileWhenGeneratedContentRemainsTheSame() {
+        Action<OutputStream> action = getAction();
+        tree.add("path/file.txt", action);
+
+        assertVisits(tree, toList("path/file.txt"), toList("path"));
+
+        TestFile file = rootDir.file("path/file.txt");
+
+        file.assertContents(equalTo("content"));
+        TestFile.Snapshot snapshot = file.snapshot();
+
+        try {
+            // make sure file modification time would change if file would get written
+            Thread.sleep(1000L);
+        } catch (InterruptedException e) {
+            // ignore
+        }
+
+        assertVisits(tree, toList("path/file.txt"), toList("path"));
+        file.assertContents(equalTo("content"));
+        file.assertHasNotChangedSince(snapshot);
+    }
+
+    @Test
+    public void overwritesFileWhenGeneratedContentChanges() {
+        final AtomicReference<String> currentContentReference = new AtomicReference<String>("content");
+
+        tree.add("path/file.txt", new Action<OutputStream>() {
+            @Override
+            public void execute(OutputStream outputStream) {
+                try {
+                    outputStream.write(currentContentReference.get().getBytes());
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        });
+
+        assertVisits(tree, toList("path/file.txt"), toList("path"));
+
+        TestFile file = rootDir.file("path/file.txt");
+
+        file.assertContents(equalTo("content"));
+        TestFile.Snapshot snapshot = file.snapshot();
+
+        currentContentReference.set("updated content");
+
+        assertVisits(tree, toList("path/file.txt"), toList("path"));
+        file.assertContents(equalTo("updated content"));
+        file.assertHasChangedSince(snapshot);
+    }
+
+    private Action<OutputStream> getAction() {
+        return new Action<OutputStream>() {
+            public void execute(OutputStream outputStream) {
+                try {
+                    outputStream.write("content".getBytes());
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            }
+        };
     }
 }

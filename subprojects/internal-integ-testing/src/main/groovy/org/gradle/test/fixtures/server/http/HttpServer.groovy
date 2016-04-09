@@ -15,6 +15,7 @@
  */
 package org.gradle.test.fixtures.server.http
 
+import com.google.common.collect.Sets
 import com.google.common.net.UrlEscapers
 import com.google.gson.Gson
 import com.google.gson.JsonElement
@@ -51,13 +52,18 @@ class HttpServer extends ServerWithExpectations {
     private Connector connector
     private SslSocketConnector sslConnector
     AuthScheme authenticationScheme = AuthScheme.BASIC
+    boolean logRequests = true
+    final Set<String> authenticationAttempts = Sets.newLinkedHashSet()
 
     protected Matcher expectedUserAgent = null
 
     List<ServerExpectation> expectations = []
 
     enum AuthScheme {
-        BASIC(new BasicAuthHandler()), DIGEST(new DigestAuthHandler())
+        BASIC(new BasicAuthHandler()),
+        DIGEST(new DigestAuthHandler()),
+        HIDE_UNAUTHORIZED(new HideUnauthorizedBasicAuthHandler()),
+        NTLM(new NtlmAuthHandler())
 
         final AuthSchemeHandler handler;
 
@@ -92,7 +98,15 @@ class HttpServer extends ServerWithExpectations {
         HandlerCollection handlers = new HandlerCollection()
         handlers.addHandler(new AbstractHandler() {
             void handle(String target, HttpServletRequest request, HttpServletResponse response, int dispatch) {
-                println("handling http request: $request.method $target")
+                String authorization = request.getHeader(HttpHeaders.AUTHORIZATION)
+                if (authorization!=null) {
+                    authenticationAttempts << authorization.split(" ")[0]
+                } else {
+                    authenticationAttempts << "None"
+                }
+                if (logRequests) {
+                    println("handling http request: $request.method $target")
+                }
             }
         })
         handlers.addHandler(collection)
@@ -116,7 +130,11 @@ class HttpServer extends ServerWithExpectations {
         if (!server.started) {
             server.start()
         }
-        "http://localhost:${port}"
+        getUri().toString()
+    }
+
+    URI getUri() {
+        return sslConnector ? URI.create("https://localhost:${sslConnector.localPort}") : URI.create("http://localhost:${connector.localPort}")
     }
 
     boolean isRunning() {
@@ -147,6 +165,10 @@ class HttpServer extends ServerWithExpectations {
         server?.stop()
         if (connector) {
             server?.removeConnector(connector)
+        }
+        if (sslConnector) {
+            sslConnector.stop()
+            server?.removeConnector(sslConnector)
         }
     }
 
@@ -271,6 +293,10 @@ class HttpServer extends ServerWithExpectations {
         expect(path, false, ['GET'], notFound(), passwordCredentials)
     }
 
+    void allowGetOrHeadMissing(String path) {
+        allow(path, false, ['GET', 'HEAD'], notFound())
+    }
+
     /**
      * Expects one HEAD request for the given URL, which return 404 status code
      */
@@ -361,6 +387,13 @@ class HttpServer extends ServerWithExpectations {
      */
     void expectHeadRedirected(String path, String location) {
         expectRedirected('HEAD', path, location)
+    }
+
+    /**
+     * Expects one PUT request for the given URL, responding with a redirect.
+     */
+    void expectPutRedirected(String path, String location) {
+        expectRedirected('PUT', path, location)
     }
 
     private void expectRedirected(String method, String path, String location) {
@@ -588,8 +621,12 @@ class HttpServer extends ServerWithExpectations {
         })
     }
 
+    void addHandler(Handler handler) {
+        collection.addHandler(handler)
+    }
+
     int getPort() {
-        return server.connectors[0].localPort
+        return connector.localPort
     }
 
     static class HttpExpectOne extends ExpectOne {
@@ -648,7 +685,11 @@ class HttpServer extends ServerWithExpectations {
             if (!response.contentType) {
                 response.setContentType("application/json")
             }
-            new Gson().toJson(data, response.writer)
+            StringBuilder sb = new StringBuilder()
+            new Gson().toJson(data, sb)
+            response.outputStream.withStream {
+                it << sb.toString().getBytes("utf8")
+            }
         }
     }
 
@@ -691,6 +732,35 @@ class HttpServer extends ServerWithExpectations {
         @Override
         protected Authenticator getAuthenticator() {
             return new BasicAuthenticator()
+        }
+    }
+
+    public static class HideUnauthorizedBasicAuthHandler extends AuthSchemeHandler {
+        @Override
+        protected String constraintName() {
+            return Constraint.__BASIC_AUTH
+        }
+
+        @Override
+        protected Authenticator getAuthenticator() {
+            return new BasicAuthenticator() {
+                @Override
+                void sendChallenge(UserRealm realm, Response response) throws IOException {
+                    response.sendError(HttpServletResponse.SC_NOT_FOUND);
+                }
+            }
+        }
+    }
+
+    public static class NtlmAuthHandler extends AuthSchemeHandler {
+        @Override
+        protected String constraintName() {
+            return NtlmAuthenticator.NTLM_AUTH_METHOD
+        }
+
+        @Override
+        protected Authenticator getAuthenticator() {
+            return new NtlmAuthenticator()
         }
     }
 

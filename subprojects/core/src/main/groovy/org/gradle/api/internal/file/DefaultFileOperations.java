@@ -15,58 +15,61 @@
  */
 package org.gradle.api.internal.file;
 
-import groovy.lang.Closure;
 import org.gradle.api.Action;
 import org.gradle.api.InvalidUserDataException;
 import org.gradle.api.PathValidation;
 import org.gradle.api.file.*;
-import org.gradle.api.internal.ClosureBackedAction;
 import org.gradle.api.internal.ProcessOperations;
 import org.gradle.api.internal.file.archive.TarFileTree;
 import org.gradle.api.internal.file.archive.ZipFileTree;
 import org.gradle.api.internal.file.collections.DefaultConfigurableFileCollection;
 import org.gradle.api.internal.file.collections.DefaultConfigurableFileTree;
+import org.gradle.api.internal.file.collections.DirectoryFileTreeFactory;
 import org.gradle.api.internal.file.collections.FileTreeAdapter;
 import org.gradle.api.internal.file.copy.DefaultCopySpec;
-import org.gradle.api.internal.file.copy.DeleteActionImpl;
+import org.gradle.api.internal.file.delete.Deleter;
 import org.gradle.api.internal.file.copy.FileCopier;
 import org.gradle.api.internal.resources.DefaultResourceHandler;
 import org.gradle.api.internal.tasks.TaskResolver;
 import org.gradle.api.resources.ReadableResource;
+import org.gradle.api.resources.internal.ReadableResourceInternal;
 import org.gradle.api.tasks.WorkResult;
-import org.gradle.internal.nativeplatform.filesystem.FileSystem;
+import org.gradle.internal.nativeintegration.filesystem.FileSystem;
 import org.gradle.internal.reflect.Instantiator;
 import org.gradle.process.ExecResult;
-import org.gradle.process.internal.*;
-import org.gradle.util.ConfigureUtil;
+import org.gradle.process.ExecSpec;
+import org.gradle.process.JavaExecSpec;
+import org.gradle.process.internal.DefaultExecAction;
+import org.gradle.process.internal.DefaultJavaExecAction;
+import org.gradle.process.internal.ExecAction;
+import org.gradle.process.internal.JavaExecAction;
 import org.gradle.util.GFileUtils;
 
 import java.io.File;
 import java.net.URI;
-import java.util.Collections;
 import java.util.Map;
 
-import static org.gradle.util.ConfigureUtil.configure;
-
-public class DefaultFileOperations implements FileOperations, ProcessOperations, ExecActionFactory {
+public class DefaultFileOperations implements FileOperations, ProcessOperations {
     private final FileResolver fileResolver;
     private final TaskResolver taskResolver;
     private final TemporaryFileProvider temporaryFileProvider;
     private final Instantiator instantiator;
-    private final DeleteAction deleteAction;
+    private final Deleter deleter;
     private final DefaultResourceHandler resourceHandler;
     private final FileCopier fileCopier;
     private final FileSystem fileSystem;
+    private final DirectoryFileTreeFactory directoryFileTreeFactory;
 
-    public DefaultFileOperations(FileResolver fileResolver, TaskResolver taskResolver, TemporaryFileProvider temporaryFileProvider, Instantiator instantiator, FileLookup fileLookup) {
+    public DefaultFileOperations(FileResolver fileResolver, TaskResolver taskResolver, TemporaryFileProvider temporaryFileProvider, Instantiator instantiator, FileLookup fileLookup, DirectoryFileTreeFactory directoryFileTreeFactory) {
         this.fileResolver = fileResolver;
         this.taskResolver = taskResolver;
         this.temporaryFileProvider = temporaryFileProvider;
         this.instantiator = instantiator;
-        this.deleteAction = new DeleteActionImpl(fileResolver);
-        this.resourceHandler = new DefaultResourceHandler(fileResolver);
-        fileCopier = new FileCopier(this.instantiator, this.fileResolver, fileLookup);
-        fileSystem = fileLookup.getFileSystem();
+        this.directoryFileTreeFactory = directoryFileTreeFactory;
+        this.resourceHandler = new DefaultResourceHandler(this, temporaryFileProvider);
+        this.fileCopier = new FileCopier(this.instantiator, this.fileResolver, fileLookup);
+        this.fileSystem = fileLookup.getFileSystem();
+        this.deleter = new Deleter(fileResolver, fileSystem);
     }
 
     public File file(Object path) {
@@ -80,41 +83,36 @@ public class DefaultFileOperations implements FileOperations, ProcessOperations,
     public URI uri(Object path) {
         return fileResolver.resolveUri(path);
     }
-    
+
     public ConfigurableFileCollection files(Object... paths) {
         return new DefaultConfigurableFileCollection(fileResolver, taskResolver, paths);
     }
 
-    public ConfigurableFileCollection files(Object paths, Closure configureClosure) {
-        return configure(configureClosure, files(paths));
-    }
-
     public ConfigurableFileTree fileTree(Object baseDir) {
-        return new DefaultConfigurableFileTree(baseDir, fileResolver, taskResolver, fileCopier);
-    }
-
-    public ConfigurableFileTree fileTree(Object baseDir, Closure closure) {
-        return ConfigureUtil.configure(closure, fileTree(baseDir));
+        return new DefaultConfigurableFileTree(baseDir, fileResolver, taskResolver, fileCopier, directoryFileTreeFactory);
     }
 
     public ConfigurableFileTree fileTree(Map<String, ?> args) {
-        return new DefaultConfigurableFileTree(args, fileResolver, taskResolver, fileCopier);
-    }
-
-    @Deprecated
-    public ConfigurableFileTree fileTree(Closure closure) {
-        // This method is deprecated, but the deprecation warning is added on public classes that delegate to this. 
-        return configure(closure, new DefaultConfigurableFileTree(Collections.emptyMap(), fileResolver, taskResolver, fileCopier));
+        return new DefaultConfigurableFileTree(args, fileResolver, taskResolver, fileCopier, directoryFileTreeFactory);
     }
 
     public FileTree zipTree(Object zipPath) {
-        return new FileTreeAdapter(new ZipFileTree(file(zipPath), getExpandDir(), fileSystem));
+        return new FileTreeAdapter(new ZipFileTree(file(zipPath), getExpandDir(), fileSystem, directoryFileTreeFactory));
     }
 
     public FileTree tarTree(Object tarPath) {
-        ReadableResource res = getResources().maybeCompressed(tarPath);
-
-        TarFileTree tarTree = new TarFileTree(res, getExpandDir(), fileSystem);
+        File tarFile = null;
+        ReadableResourceInternal resource;
+        if (tarPath instanceof ReadableResourceInternal) {
+            resource = (ReadableResourceInternal) tarPath;
+        } else if (tarPath instanceof ReadableResource) {
+            // custom type
+            resource = new UnknownBackingFileReadableResource((ReadableResource)tarPath);
+        } else {
+            tarFile = file(tarPath);
+            resource = new FileResource(tarFile);
+        }
+        TarFileTree tarTree = new TarFileTree(tarFile, new MaybeCompressedFileResource(resource), getExpandDir(), fileSystem, fileSystem, directoryFileTreeFactory);
         return new FileTreeAdapter(tarTree);
     }
 
@@ -136,43 +134,46 @@ public class DefaultFileOperations implements FileOperations, ProcessOperations,
     }
 
     public boolean delete(Object... paths) {
-        return deleteAction.delete(paths);
+        return deleter.delete(paths);
     }
 
-    public WorkResult copy(Closure closure) {
-        return fileCopier.copy(new ClosureBackedAction<CopySpec>(closure));
+    public WorkResult delete(Action<? super DeleteSpec> action) {
+        return deleter.delete(action);
+    }
+
+    public WorkResult copy(Action<? super CopySpec> action) {
+        return fileCopier.copy(action);
     }
 
     public WorkResult sync(Action<? super CopySpec> action) {
         return fileCopier.sync(action);
     }
 
-    public CopySpec copySpec(Closure closure) {
-        return copySpec(new ClosureBackedAction<CopySpec>(closure));
-    }
-
     public CopySpec copySpec(Action<? super CopySpec> action) {
-        DefaultCopySpec copySpec = instantiator.newInstance(DefaultCopySpec.class, fileResolver, instantiator);
+        CopySpec copySpec = copySpec();
         action.execute(copySpec);
         return copySpec;
+    }
+
+    @Override
+    public CopySpec copySpec() {
+        return instantiator.newInstance(DefaultCopySpec.class, fileResolver, instantiator);
     }
 
     public FileResolver getFileResolver() {
         return fileResolver;
     }
 
-    public ExecResult javaexec(Closure cl) {
-        JavaExecAction javaExecAction = ConfigureUtil.configure(cl, instantiator.newInstance(DefaultJavaExecAction.class, fileResolver));
+    public ExecResult javaexec(Action<? super JavaExecSpec> action) {
+        JavaExecAction javaExecAction = instantiator.newInstance(DefaultJavaExecAction.class, fileResolver);
+        action.execute(javaExecAction);
         return javaExecAction.execute();
     }
 
-    public ExecResult exec(Closure cl) {
-        ExecAction execAction = ConfigureUtil.configure(cl, instantiator.newInstance(DefaultExecAction.class, fileResolver));
+    public ExecResult exec(Action<? super ExecSpec> action) {
+        ExecAction execAction = instantiator.newInstance(DefaultExecAction.class, fileResolver);
+        action.execute(execAction);
         return execAction.execute();
-    }
-
-    public ExecAction newExecAction() {
-        return new DefaultExecAction(fileResolver);
     }
 
     public DefaultResourceHandler getResources() {

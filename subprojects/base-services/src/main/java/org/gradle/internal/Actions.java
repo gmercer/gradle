@@ -21,11 +21,12 @@ import org.gradle.api.Transformer;
 import org.gradle.api.specs.Spec;
 
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.Arrays;
+import java.util.Collection;
 
 public abstract class Actions {
+
+    private static final Action<?> DO_NOTHING = new NullAction<Object>();
 
     /**
      * Creates an action implementation that simply does nothing.
@@ -34,12 +35,14 @@ public abstract class Actions {
      *
      * @return An action object with an empty implementation
      */
+    @SuppressWarnings("unchecked")
     public static <T> Action<T> doNothing() {
-        return new NullAction<T>();
+        return (Action<T>) DO_NOTHING;
     }
 
     private static class NullAction<T> implements Action<T>, Serializable {
-        public void execute(T t) {}
+        public void execute(T t) {
+        }
     }
 
     /**
@@ -49,7 +52,7 @@ public abstract class Actions {
      * @param <T> The type of the object that action is for
      * @return The composite action.
      */
-    public static <T> Action<T> composite(Iterable<Action<? super T>> actions) {
+    public static <T> Action<T> composite(Iterable<? extends Action<? super T>> actions) {
         return new CompositeAction<T>(actions);
     }
 
@@ -61,15 +64,13 @@ public abstract class Actions {
      * @return The composite action.
      */
     public static <T> Action<T> composite(Action<? super T>... actions) {
-        final List<Action<? super T>> actionsCopy = new ArrayList<Action<? super T>>(actions.length);
-        Collections.addAll(actionsCopy, actions);
-        return composite(actionsCopy);
-   }
+        return composite(Arrays.asList(actions));
+    }
 
     private static class CompositeAction<T> implements Action<T> {
-        private final Iterable<Action<? super T>> actions;
+        private final Iterable<? extends Action<? super T>> actions;
 
-        private CompositeAction(Iterable<Action<? super T>> actions) {
+        private CompositeAction(Iterable<? extends Action<? super T>> actions) {
             this.actions = actions;
         }
 
@@ -153,6 +154,7 @@ public abstract class Actions {
      * @return An action that runs the given runnable, ignoring the argument.
      */
     public static <T> Action<T> toAction(Runnable runnable) {
+        //TODO SF this method accepts Closure instance as parameter but does not work correctly for it
         if (runnable == null) {
             return Actions.doNothing();
         } else {
@@ -203,6 +205,20 @@ public abstract class Actions {
                 action.execute(t);
             }
         }
+    }
+
+    public static <T> T with(T instance, Action<? super T> action) {
+        action.execute(instance);
+        return instance;
+    }
+
+    public static <T> Action<T> add(final Collection<? super T> collection) {
+        return new Action<T>() {
+            @Override
+            public void execute(T t) {
+                collection.add(t);
+            }
+        };
     }
 
 }

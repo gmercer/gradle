@@ -60,7 +60,7 @@
             </thead>
             <tr>
                 <td>reportsDir</td>
-                <td>"<replaceable>$buildDir</replaceable>/reports/jacoco"
+                <td>“<replaceable>$buildDir</replaceable>/reports/jacoco”
                 </td>
             </tr>
         </table>
@@ -124,6 +124,10 @@
             <tr>
                 <td>excludeClassLoaders</td>
                 <td>[]</td>
+            </tr>
+            <tr>
+                <td>includeNoLocationClasses</td>
+                <td>false</td>
             </tr>
             <tr>
                 <td>sessionId</td>

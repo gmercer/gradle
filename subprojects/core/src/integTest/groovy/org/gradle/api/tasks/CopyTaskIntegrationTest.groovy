@@ -62,6 +62,7 @@ public class CopyTaskIntegrationTest extends AbstractIntegrationTest {
         usingBuildFile(buildFile).withTasks("copy").run()
         testFile('dest').assertHasDescendants(
                 'root.a',
+                'accents.c',
                 'one/one.a',
                 'two/two.a',
         )
@@ -132,6 +133,7 @@ public class CopyTaskIntegrationTest extends AbstractIntegrationTest {
         testFile('dest').assertHasDescendants(
                 'root.renamed',
                 'root.b',
+                'accents.c',
                 'one/renamed_one.renamed',
                 'one/renamed_one.b',
                 'one/sub/onesub.renamed',
@@ -156,6 +158,7 @@ public class CopyTaskIntegrationTest extends AbstractIntegrationTest {
         testFile('dest').assertHasDescendants(
                 'root.a',
                 'root.b',
+                'accents.c',
                 'one/one.a',
                 'one/one.b',
                 'one/sub/onesub.a',
@@ -230,6 +233,7 @@ public class CopyTaskIntegrationTest extends AbstractIntegrationTest {
         testFile('dest').assertHasDescendants(
                 'root.renamed_twice',
                 'root.b',
+                'accents.c',
                 'prefix/one/one.renamed_twice',
                 'prefix/one/one.b',
                 'prefix/one_sub/onesub.renamed_twice',
@@ -255,6 +259,7 @@ public class CopyTaskIntegrationTest extends AbstractIntegrationTest {
         testFile('dest').assertHasDescendants(
                 'root.a',
                 'root.b',
+                'accents.c',
                 'one/one.a',
                 'one/one.b',
                 'two/two.a',
@@ -278,6 +283,7 @@ public class CopyTaskIntegrationTest extends AbstractIntegrationTest {
         testFile('dest').assertHasDescendants(
                 'root.a',
                 'root.b',
+                'accents.c',
                 'one/one.a',
                 'one/one.b',
                 'two/two.a',
@@ -304,6 +310,7 @@ public class CopyTaskIntegrationTest extends AbstractIntegrationTest {
         usingBuildFile(buildFile).withTasks("copy").run()
         testFile('dest').assertHasDescendants(
                 'root.a',
+                'accents.c',
                 'one/one.a',
                 'two/two.a',
                 'three/three.a',
@@ -425,7 +432,8 @@ public class CopyTaskIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    @Ignore //this does not pass with current implementation
+    @Ignore
+    //this does not pass with current implementation
     public void testIncludeExcludeWithCopyspec() {
         TestFile buildFile = testFile("build.gradle").writelns(
                 """
@@ -566,10 +574,9 @@ public class CopyTaskIntegrationTest extends AbstractIntegrationTest {
 
         '''
 
-        def result = usingBuildFile(buildFile).withTasks("copy").run()
+        usingBuildFile(buildFile).withTasks("copy").run()
         file('dest').assertHasDescendants('path/file.txt')
         file('dest/path/file.txt').assertContents(Matchers.containsText("f1"))
-        assertFalse(result.output.contains('deprecated'))
     }
 
     @Test
@@ -590,14 +597,37 @@ public class CopyTaskIntegrationTest extends AbstractIntegrationTest {
                     eachFile { it.duplicatesStrategy = 'exclude' }
                 }
             '''
-        def result = usingBuildFile(buildFile).withTasks("copy").run()
+        usingBuildFile(buildFile).withTasks("copy").run()
         file('dest').assertHasDescendants('path/file.txt')
         file('dest/path/file.txt').assertContents(Matchers.containsText("file1"))
-        assertFalse(result.output.contains('deprecated'))
     }
 
     @Test
-    public void testChainMatchingRules() {
+    public void testEachChainedMatchingRuleAlwaysMatchesAgainstInitialSourcePath() {
+        file('path/abc.txt').createFile().write('test file with $attr')
+        file('path/bcd.txt').createFile()
+
+        def buildFile = testFile('build.gradle') <<
+                '''
+            task copy(type: Copy) {
+                from 'path'
+                into 'dest'
+                filesMatching ('**/a*') {
+                    path = path + '.template'
+                }
+                filesMatching ('**/a*') {
+                    expand(attr: 'some value')
+                    path = path.replace('template', 'concrete')
+                }
+            }'''
+
+        usingBuildFile(buildFile).withTasks('copy').run();
+        file('dest').assertHasDescendants('bcd.txt', 'abc.txt.concrete')
+        file('dest/abc.txt.concrete').text = 'test file with some value'
+    }
+
+    @Test
+    public void testChainedMatchingRulesDoNotMatchAgainstDestinationPathSetByPreviousChainElement() {
         file('path/abc.txt').createFile().write('test file with $attr')
         file('path/bcd.txt').createFile()
 
@@ -616,7 +646,96 @@ public class CopyTaskIntegrationTest extends AbstractIntegrationTest {
             }'''
 
         usingBuildFile(buildFile).withTasks('copy').run();
-        file('dest').assertHasDescendants('bcd.txt', 'abc.txt.concrete')
-        file('dest/abc.txt.concrete').text = 'test file with some value'
+        file('dest').assertHasDescendants('bcd.txt', 'abc.txt.template')
+        file('dest/abc.txt.template').text = 'test file with some $attr'
+    }
+
+    @Test
+    public void testAccessSourceNameFromFileCopyDetails() {
+        file('path/abc.txt').createFile().write('content')
+        file('path/bcd.txt').createFile()
+
+        def buildFile = testFile('build.gradle') <<
+                '''
+            task copy(type: Copy) {
+                from 'path'
+                into 'dest'
+                filesMatching ('**/a*') {
+                    name = "DEST-" + sourceName
+                }
+            }'''
+
+        usingBuildFile(buildFile).withTasks('copy').run();
+        file('dest').assertHasDescendants('bcd.txt', 'DEST-abc.txt')
+        file('dest/DEST-abc.txt').text = 'content'
+    }
+
+    @Test
+    public void testAccessSourcePathFromFileCopyDetails() {
+        file('path/abc.txt').createFile().write('content')
+        file('path/bcd.txt').createFile()
+
+        def buildFile = testFile('build.gradle') <<
+                '''
+            task copy(type: Copy) {
+                from 'path'
+                into 'dest'
+                filesMatching ('**/a*') {
+                    path = sourcePath.replace('txt', 'log')
+                }
+            }'''
+
+        usingBuildFile(buildFile).withTasks('copy').run();
+        file('dest').assertHasDescendants('bcd.txt', 'abc.log')
+        file('dest/abc.log').text = 'content'
+    }
+
+    @Test
+    public void testAccessRelativeSourcePathFromFileCopyDetails() {
+        file('path/abc.txt').createFile().write('content')
+        file('path/bcd.txt').createFile()
+
+        def buildFile = testFile('build.gradle') <<
+                '''
+            task copy(type: Copy) {
+                from 'path'
+                into 'dest'
+                filesMatching ('**/a*') {
+                    relativePath = relativeSourcePath.replaceLastName('abc.log')
+                }
+            }'''
+
+        usingBuildFile(buildFile).withTasks('copy').run();
+        file('dest').assertHasDescendants('bcd.txt', 'abc.log')
+        file('dest/abc.log').text = 'content'
+    }
+
+    @Test
+    public void testSingleLineRemoved() {
+        TestFile buildFile = testFile('build.gradle') << '''
+            task (copy, type:Copy) {
+                from "src/two/two.b"
+                into "dest"
+                def lineNumber = 1
+                filter { lineNumber++ % 2 == 0 ? null : it }
+            }'''
+        usingBuildFile(buildFile).withTasks('copy').run()
+        Iterator<String> it = testFile('dest/two.b').readLines().iterator()
+        assertThat(it.next(), startsWith('one'))
+        assertThat(it.next(), startsWith('three'))
+    }
+
+    @Test
+    public void testAllLinesRemoved() {
+        TestFile buildFile = testFile('build.gradle') << '''
+            task (copy, type:Copy) {
+                from "src/two/two.b"
+                into "dest"
+                def lineNumber = 1
+                filter { null }
+            }'''
+        usingBuildFile(buildFile).withTasks('copy').run()
+        Iterator<String> it = testFile('dest/two.b').readLines().iterator()
+        assertFalse(it.hasNext())
     }
 }

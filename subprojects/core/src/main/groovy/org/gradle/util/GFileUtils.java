@@ -28,13 +28,15 @@ import java.nio.charset.Charset;
 import java.util.*;
 import java.util.zip.Checksum;
 
+import static org.gradle.internal.concurrent.CompositeStoppable.stoppable;
+
 public class GFileUtils {
 
     public static FileInputStream openInputStream(File file) {
         try {
             return FileUtils.openInputStream(file);
         } catch (IOException e) {
-            throw new UncheckedIOException(e);
+            throw new RuntimeException("Problems opening file input stream for file: " + file, e);
         }
     }
 
@@ -79,6 +81,21 @@ public class GFileUtils {
             return FileUtils.readFileToString(file, encoding);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * Reads and returns file contents. If some exception is triggered the method returns information about this exception.
+     * Useful for including file contents in debug trace / exception messages.
+     *
+     * @param file to read
+     * @return content of the file or the problem description in case file cannot be read.
+     */
+    public static String readFileQuietly(File file) {
+        try {
+            return readFile(file);
+        } catch (Exception e) {
+            return "Unable to read file '" + file + "' due to: " + e.toString();
         }
     }
 
@@ -138,6 +155,10 @@ public class GFileUtils {
         return FileUtils.deleteQuietly(file);
     }
 
+    public static void closeInputStream(InputStream input) {
+        stoppable(input).stop();
+    }
+
     public static class TailReadingException extends RuntimeException {
         public TailReadingException(Throwable throwable) {
             super(throwable);
@@ -191,14 +212,6 @@ public class GFileUtils {
     public static Checksum checksum(File file, Checksum checksum) {
         try {
             return FileUtils.checksum(file, checksum);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    public static File canonicalise(File src) {
-        try {
-            return src.getCanonicalFile();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

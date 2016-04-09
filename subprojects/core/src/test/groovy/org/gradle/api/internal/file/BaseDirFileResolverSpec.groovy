@@ -15,13 +15,18 @@
  */
 package org.gradle.api.internal.file
 
+import org.gradle.internal.typeconversion.UnsupportedNotationException
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.util.Requires
 import org.gradle.util.TestPrecondition
+import org.gradle.util.UsesNativeServices
 import org.junit.Rule
 import spock.lang.Specification
 
+import static org.gradle.util.TextUtil.toPlatformLineSeparators
+
+@UsesNativeServices
 class BaseDirFileResolverSpec extends Specification {
     @Rule TestNameTestDirectoryProvider tmpDir = new TestNameTestDirectoryProvider()
 
@@ -158,7 +163,7 @@ class BaseDirFileResolverSpec extends Specification {
 
     @Requires(TestPrecondition.WINDOWS)
     def "normalizes non-existent file system root"() {
-        def file = new File("Q:\\")
+        def file = nonexistentFsRoot()
         assert !file.exists()
         assert file.absolute
 
@@ -171,6 +176,20 @@ class BaseDirFileResolverSpec extends Specification {
 
         expect:
         normalize("../../..", root) == root
+    }
+
+    def "cannot resolve file using unsupported notation"() {
+        when:
+        resolver().resolve(12)
+
+        then:
+        UnsupportedNotationException e = thrown()
+        e.message == toPlatformLineSeparators("""Cannot convert the provided notation to a File or URI: 12.
+The following types/formats are supported:
+  - A String or CharSequence path, for example 'src/main/java' or '/usr/include'.
+  - A String or CharSequence URI, for example 'file:/usr/include'.
+  - A File instance.
+  - A URI or URL instance.""")
     }
 
     def createLink(File link, File target) {
@@ -188,10 +207,22 @@ class BaseDirFileResolverSpec extends Specification {
     }
 
     def normalize(Object path, File baseDir = tmpDir.testDirectory) {
-        new BaseDirFileResolver(TestFiles.fileSystem(), baseDir).resolve(path)
+        resolver(baseDir).resolve(path)
+    }
+
+    private BaseDirFileResolver resolver(File baseDir = tmpDir.testDirectory) {
+        new BaseDirFileResolver(TestFiles.fileSystem(), baseDir, TestFiles.getPatternSetFactory())
     }
 
     private File[] getFsRoots() {
         File.listRoots().findAll { !it.absolutePath.startsWith("A:") }
+    }
+    
+    private File nonexistentFsRoot() {
+        ('Z'..'A').collect { 
+            "$it:\\" 
+        }.findResult {
+            new File(it).exists() ? null : new File(it)
+        }
     }
 }

@@ -22,8 +22,8 @@ import org.gradle.api.execution.TaskExecutionListener;
 import org.gradle.api.invocation.Gradle;
 import org.gradle.api.tasks.TaskState;
 import org.gradle.internal.progress.LoggerProvider;
-import org.gradle.logging.ProgressLogger;
-import org.gradle.logging.ProgressLoggerFactory;
+import org.gradle.internal.logging.ProgressLogger;
+import org.gradle.internal.logging.ProgressLoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -31,23 +31,24 @@ import java.util.Map;
 /**
  * A listener which logs the execution of tasks.
  */
+@Deprecated
 public class TaskExecutionLogger implements TaskExecutionListener {
 
     private final Map<Task, ProgressLogger> currentTasks = new HashMap<Task, ProgressLogger>();
     private final ProgressLoggerFactory progressLoggerFactory;
-    private LoggerProvider parentLoggerPovider;
+    private LoggerProvider parentLoggerProvider;
 
-    public TaskExecutionLogger(ProgressLoggerFactory progressLoggerFactory, LoggerProvider parentLoggerPovider) {
+    public TaskExecutionLogger(ProgressLoggerFactory progressLoggerFactory, LoggerProvider parentLoggerProvider) {
         this.progressLoggerFactory = progressLoggerFactory;
-        this.parentLoggerPovider = parentLoggerPovider;
+        this.parentLoggerProvider = parentLoggerProvider;
     }
 
     public void beforeExecute(Task task) {
         assert !currentTasks.containsKey(task);
 
-        ProgressLogger currentTask = progressLoggerFactory.newOperation(TaskExecutionLogger.class, parentLoggerPovider.getLogger());
+        ProgressLogger currentTask = progressLoggerFactory.newOperation(TaskExecutionLogger.class, parentLoggerProvider.getLogger());
         String displayName = getDisplayName(task);
-        currentTask.setDescription(String.format("Execute %s", displayName));
+        currentTask.setDescription("Execute ".concat(displayName));
         currentTask.setShortDescription(displayName);
         currentTask.setLoggingHeader(displayName);
         currentTask.started();

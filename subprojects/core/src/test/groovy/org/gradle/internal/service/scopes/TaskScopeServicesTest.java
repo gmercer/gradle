@@ -22,12 +22,12 @@ import org.gradle.api.internal.file.FileResolver;
 import org.gradle.api.internal.project.ProjectInternal;
 import org.gradle.api.internal.tasks.DefaultTaskInputs;
 import org.gradle.api.internal.tasks.DefaultTaskOutputs;
-import org.gradle.api.internal.tasks.TaskStatusNagger;
+import org.gradle.api.internal.tasks.TaskMutator;
 import org.gradle.api.logging.LoggingManager;
 import org.gradle.api.tasks.TaskInputs;
 import org.gradle.internal.Factory;
 import org.gradle.internal.service.ServiceRegistry;
-import org.gradle.logging.LoggingManagerInternal;
+import org.gradle.internal.logging.LoggingManagerInternal;
 import org.jmock.Expectations;
 import org.jmock.integration.junit4.JMock;
 import org.jmock.integration.junit4.JUnit4Mockery;
@@ -70,8 +70,8 @@ public class TaskScopeServicesTest {
 
     @Test
     public void createsATaskStatusNaggerInstance() {
-        TaskStatusNagger nagger = registry.get(TaskStatusNagger.class);
-        assertSame(nagger, registry.get(TaskStatusNagger.class));
+        TaskMutator nagger = registry.get(TaskMutator.class);
+        assertSame(nagger, registry.get(TaskMutator.class));
     }
 
     @Test

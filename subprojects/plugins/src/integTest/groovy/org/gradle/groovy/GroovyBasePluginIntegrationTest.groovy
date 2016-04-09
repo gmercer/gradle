@@ -18,36 +18,7 @@ package org.gradle.groovy
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
 
 class GroovyBasePluginIntegrationTest extends AbstractIntegrationSpec {
-    def "defaults groovyClasspath to 'groovy' configuration if the latter is non-empty"() {
-        executer.withDeprecationChecksDisabled()
-        file("build.gradle") << """
-apply plugin: "groovy-base"
-
-sourceSets {
-    custom
-}
-
-repositories {
-    mavenCentral()
-}
-
-dependencies {
-    groovy "org.codehaus.groovy:groovy-all:2.1.2"
-}
-
-task groovydoc(type: Groovydoc)
-
-task verify << {
-    assert compileCustomGroovy.groovyClasspath.is(configurations.groovy)
-    assert groovydoc.groovyClasspath.is(configurations.groovy)
-}
-"""
-
-        expect:
-        succeeds("verify")
-    }
-
-    def "defaults Groovy class path to inferred Groovy dependency if Groovy configuration is empty"() {
+    def "defaults Groovy class path to inferred Groovy dependency"() {
         file("build.gradle") << """
 apply plugin: "groovy-base"
 
@@ -77,10 +48,10 @@ task verify << {
         succeeds("verify")
 
         where:
-        dependency                                  | jarFile
-        "org.codehaus.groovy:groovy-all:2.1.2"      | "groovy-all-2.1.2.jar"
-        "org.codehaus.groovy:groovy:2.1.2"          | "groovy-2.1.2.jar"
-        "org.codehaus.groovy:groovy-all:2.1.2:indy" | "groovy-all-2.1.2-indy.jar"
+        dependency                                   | jarFile
+        "org.codehaus.groovy:groovy-all:2.4.4"      | "groovy-all-2.4.4.jar"
+        "org.codehaus.groovy:groovy:2.4.4"          | "groovy-2.4.4.jar"
+        "org.codehaus.groovy:groovy-all:2.4.4:indy" | "groovy-all-2.4.4-indy.jar"
     }
 
     def "only resolves source class path feeding into inferred Groovy class path if/when the latter is actually used (but not during autowiring)"() {
@@ -96,7 +67,7 @@ repositories {
 }
 
 dependencies {
-    customCompile "org.codehaus.groovy:groovy-all:2.1.2"
+    customCompile "org.codehaus.groovy:groovy-all:2.4.4"
 }
 
 task groovydoc(type: Groovydoc) {
@@ -139,6 +110,7 @@ task verify << {
         fails "compileGroovy"
 
         then:
-        failure.assertHasDescription "Cannot infer Groovy class path because no Groovy Jar was found on class path: configuration ':compile'"
+        failure.assertHasDescription "Cannot infer Groovy class path because no Groovy Jar was found on class path: configuration ':compileClasspath'"
     }
+
 }

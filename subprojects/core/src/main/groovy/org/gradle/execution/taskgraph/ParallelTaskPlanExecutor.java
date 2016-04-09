@@ -16,18 +16,13 @@
 
 package org.gradle.execution.taskgraph;
 
-import org.gradle.api.Project;
-import org.gradle.api.Task;
-import org.gradle.api.execution.TaskExecutionListener;
+import org.gradle.api.Action;
+import org.gradle.api.internal.TaskInternal;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 import org.gradle.internal.concurrent.ExecutorFactory;
 import org.gradle.internal.concurrent.StoppableExecutor;
 
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
 import java.util.concurrent.Executor;
 
 class ParallelTaskPlanExecutor extends AbstractTaskPlanExecutor {
@@ -44,34 +39,24 @@ class ParallelTaskPlanExecutor extends AbstractTaskPlanExecutor {
         this.executorCount = numberOfParallelExecutors;
     }
 
-    public void process(final TaskExecutionPlan taskExecutionPlan, final TaskExecutionListener taskListener) {
+    @Override
+    public void process(TaskExecutionPlan taskExecutionPlan, Action<? super TaskInternal> taskWorker) {
         StoppableExecutor executor = executorFactory.create("Task worker");
         try {
-            startAdditionalWorkers(taskExecutionPlan, taskListener, executor);
-            taskWorker(taskExecutionPlan, taskListener).run();
+            startAdditionalWorkers(taskExecutionPlan, taskWorker, executor);
+            taskWorker(taskExecutionPlan, taskWorker).run();
             taskExecutionPlan.awaitCompletion();
         } finally {
             executor.stop();
         }
     }
 
-    private void startAdditionalWorkers(TaskExecutionPlan taskExecutionPlan, TaskExecutionListener taskListener, Executor executor) {
-        List<Project> projects = getAllProjects(taskExecutionPlan);
-        int numExecutors = Math.min(executorCount, projects.size());
+    private void startAdditionalWorkers(TaskExecutionPlan taskExecutionPlan, Action<? super TaskInternal> taskWorker, Executor executor) {
+        LOGGER.info("Using {} parallel executor threads", executorCount);
 
-        LOGGER.info("Using {} parallel executor threads", numExecutors);
-
-        for (int i = 1; i < numExecutors; i++) {
-            Runnable worker = taskWorker(taskExecutionPlan, taskListener);
+        for (int i = 1; i < executorCount; i++) {
+            Runnable worker = taskWorker(taskExecutionPlan, taskWorker);
             executor.execute(worker);
         }
-    }
-
-    private List<Project> getAllProjects(TaskExecutionPlan taskExecutionPlan) {
-        final Set<Project> uniqueProjects = new LinkedHashSet<Project>();
-        for (Task task : taskExecutionPlan.getTasks()) {
-            uniqueProjects.add(task.getProject());
-        }
-        return new ArrayList<Project>(uniqueProjects);
     }
 }

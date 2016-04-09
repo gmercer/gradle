@@ -17,7 +17,9 @@
 package org.gradle.tooling.model.gradle;
 
 import org.gradle.api.Incubating;
+import org.gradle.tooling.model.BuildIdentifier;
 import org.gradle.tooling.model.DomainObjectSet;
+import org.gradle.tooling.model.Model;
 
 /**
  * Provides information about the structure of a Gradle build.
@@ -25,7 +27,15 @@ import org.gradle.tooling.model.DomainObjectSet;
  * @since 1.8
  */
 @Incubating
-public interface GradleBuild {
+public interface GradleBuild extends Model {
+    /**
+     * Returns the identifier for this Gradle build.
+     *
+     * @since 2.13
+     */
+    @Incubating
+    BuildIdentifier getBuildIdentifier();
+
     /**
      * Returns the root project for this build.
      *

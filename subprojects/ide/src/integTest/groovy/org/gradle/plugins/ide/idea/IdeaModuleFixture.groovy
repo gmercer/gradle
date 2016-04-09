@@ -25,6 +25,13 @@ class IdeaModuleFixture {
         this.iml = iml
     }
 
+    String getLanguageLevel() {
+        if(iml.component.@LANGUAGE_LEVEL.size() != 0){
+            return iml.component.@LANGUAGE_LEVEL
+        }
+        return null
+    }
+
     ImlDependencies getDependencies() {
         new ImlDependencies(iml.component.orderEntry.collect { it ->
             if (it.@type == 'module-library') {
@@ -32,6 +39,8 @@ class IdeaModuleFixture {
                 lib.type = 'module-library'
                 lib.url = it.library.CLASSES.root.@url.text()
                 lib.scope = it.@scope != '' ? it.@scope : 'COMPILE'
+                lib.source = it.library.SOURCES.root.@url*.text()
+                lib.javadoc = it.library.JAVADOC.root.@url*.text()
                 return lib
             } else if (it.@type == 'module') {
                 def module = new ImlModule()
@@ -107,6 +116,8 @@ class IdeaModuleFixture {
     class ImlLibrary extends ImlDependency {
         String scope
         String url
+        List<String> javadoc
+        List<String> source
 
         @Override
         public String toString() {
@@ -115,6 +126,26 @@ class IdeaModuleFixture {
                     ", scope='" + scope + '\'' +
                     ", url='" + url + '\'' +
                     '}';
+        }
+
+        String getJarName() {
+            return url.replaceFirst('!/$', '').split('/').last()
+        }
+
+        void assertHasSource(List<String> filenames) {
+            assert source.collect { it.replaceFirst('!/$', '').split('/').last() } == filenames
+        }
+
+        void assertHasJavadoc(List<String> filenames) {
+            assert javadoc.collect { it.replaceFirst('!/$', '').split('/').last() } == filenames
+        }
+
+        void assertHasNoJavadoc() {
+            assert javadoc.empty
+        }
+
+        void assertHasNoSource() {
+            assert source.empty
         }
     }
 }

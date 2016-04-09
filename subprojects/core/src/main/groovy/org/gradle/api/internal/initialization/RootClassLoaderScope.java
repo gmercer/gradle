@@ -16,54 +16,72 @@
 
 package org.gradle.api.internal.initialization;
 
+import org.gradle.api.internal.initialization.loadercache.ClassLoaderCache;
 import org.gradle.internal.classpath.ClassPath;
 
 public class RootClassLoaderScope implements ClassLoaderScope {
 
-    private final ClassLoader classLoader;
+    private final ClassLoader localClassLoader;
+    private final ClassLoader exportClassLoader;
     private final ClassLoaderCache classLoaderCache;
+    private final ClassLoaderScopeIdentifier id;
 
-    public RootClassLoaderScope(ClassLoader classLoader, ClassLoaderCache classLoaderCache) {
-        this.classLoader = classLoader;
+    public RootClassLoaderScope(ClassLoader localClassLoader, ClassLoader exportClassLoader, ClassLoaderCache classLoaderCache) {
+        this.localClassLoader = localClassLoader;
+        this.exportClassLoader = exportClassLoader;
         this.classLoaderCache = classLoaderCache;
+        this.id = new ClassLoaderScopeIdentifier(null, "root");
     }
 
-    public ClassLoader getScopeClassLoader() {
-        return classLoader;
+    @Override
+    public ClassLoader getLocalClassLoader() {
+        return localClassLoader;
     }
 
-    public ClassLoader getChildClassLoader() {
-        return classLoader;
+    @Override
+    public ClassLoader getExportClassLoader() {
+        return exportClassLoader;
     }
 
-    public ClassLoaderScope getBase() {
-        return this;
+    @Override
+    public ClassLoaderScope getParent() {
+        return this; // should this be null?
     }
 
-    public ClassLoader addLocal(ClassPath classpath) {
+    @Override
+    public boolean defines(Class<?> clazz) {
+        return localClassLoader.equals(clazz.getClassLoader()) || exportClassLoader.equals(clazz.getClassLoader());
+    }
+
+    @Override
+    public ClassLoaderScope local(ClassPath classPath) {
         throw new UnsupportedOperationException("root class loader scope is immutable");
     }
 
-    public ClassLoader export(ClassPath classpath) {
+    @Override
+    public ClassLoaderScope export(ClassPath classPath) {
         throw new UnsupportedOperationException("root class loader scope is immutable");
     }
 
-    public ClassLoaderScope createSibling() {
-        return createChild();
+    @Override
+    public ClassLoaderScope export(ClassLoader classLoader) {
+        throw new UnsupportedOperationException("root class loader scope is immutable");
     }
 
-    public ClassLoaderScope createChild() {
-        return new DefaultClassLoaderScope(this, this, classLoaderCache);
+    @Override
+    public ClassLoaderScope createChild(String name) {
+        if (name == null) {
+            throw new IllegalArgumentException("'name' cannot be null");
+        }
+        return new DefaultClassLoaderScope(id.child(name), this, classLoaderCache);
     }
 
-    public ClassLoaderScope createRebasedChild() {
-        return createChild();
-    }
-
+    @Override
     public ClassLoaderScope lock() {
         return this;
     }
 
+    @Override
     public boolean isLocked() {
         return true;
     }

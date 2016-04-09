@@ -16,8 +16,8 @@
 
 package org.gradle.api.internal.cache;
 
-import org.gradle.messaging.serialize.Decoder;
-import org.gradle.messaging.serialize.Encoder;
+import org.gradle.internal.serialize.Decoder;
+import org.gradle.internal.serialize.Encoder;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -28,15 +28,15 @@ public interface BinaryStore {
     //done writing data, release any resources
     BinaryData done();
 
-    public static interface WriteAction {
+    interface WriteAction {
         void write(Encoder encoder) throws IOException;
     }
 
-    public static interface ReadAction<T> {
+    interface ReadAction<T> {
         T read(Decoder decoder) throws IOException;
     }
 
-    public static interface BinaryData extends Closeable {
+    interface BinaryData extends Closeable {
         <T> T read(ReadAction<T> readAction);
     }
 }

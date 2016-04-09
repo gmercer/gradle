@@ -17,6 +17,8 @@ package org.gradle.api.internal.artifacts.dsl.dependencies
 
 import org.gradle.api.artifacts.*
 import org.gradle.api.artifacts.dsl.ComponentMetadataHandler
+import org.gradle.api.artifacts.dsl.ComponentModuleMetadataHandler
+import org.gradle.api.internal.artifacts.query.ArtifactResolutionQueryFactory
 import spock.lang.Specification
 
 class DefaultDependencyHandlerTest extends Specification {
@@ -28,7 +30,7 @@ class DefaultDependencyHandlerTest extends Specification {
     private DependencySet dependencySet = Mock()
 
     private DefaultDependencyHandler dependencyHandler = new DefaultDependencyHandler(
-            configurationContainer, dependencyFactory, projectFinder, Stub(ComponentMetadataHandler), Stub(ArtifactResolutionQueryFactory))
+            configurationContainer, dependencyFactory, projectFinder, Stub(ComponentMetadataHandler), Stub(ComponentModuleMetadataHandler), Stub(ArtifactResolutionQueryFactory))
 
     void setup() {
         _ * configurationContainer.findByName(TEST_CONF_NAME) >> configuration
@@ -239,6 +241,19 @@ class DefaultDependencyHandlerTest extends Specification {
 
         and:
         1 * dependencyFactory.createDependency(DependencyFactory.ClassPathNotation.GRADLE_API) >> dependency
+    }
+
+    void "creates Gradle test-kit dependency"() {
+        Dependency dependency = Mock()
+
+        when:
+        def result = dependencyHandler.gradleTestKit()
+
+        then:
+        result == dependency
+
+        and:
+        1 * dependencyFactory.createDependency(DependencyFactory.ClassPathNotation.GRADLE_TEST_KIT) >> dependency
     }
 
     void "creates local groovy dependency"() {

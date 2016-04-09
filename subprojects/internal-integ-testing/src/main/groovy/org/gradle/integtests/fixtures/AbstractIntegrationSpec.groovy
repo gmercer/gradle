@@ -17,26 +17,35 @@ package org.gradle.integtests.fixtures
 
 import org.gradle.api.Action
 import org.gradle.integtests.fixtures.executer.*
-import org.gradle.test.fixtures.file.TestDirectoryProvider
+import org.gradle.test.fixtures.file.CleanupTestDirectory
 import org.gradle.test.fixtures.file.TestFile
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.test.fixtures.ivy.IvyFileRepository
+import org.gradle.test.fixtures.maven.M2Installation
 import org.gradle.test.fixtures.maven.MavenFileRepository
 import org.gradle.test.fixtures.maven.MavenLocalRepository
+import org.hamcrest.CoreMatchers
+import org.hamcrest.Matcher
 import org.junit.Rule
 import spock.lang.Specification
 
+import static org.gradle.util.Matchers.normalizedLineSeparators
+
 /**
  * Spockified version of AbstractIntegrationTest.
- * 
+ *
  * Plan is to bring features over as needed.
  */
-class AbstractIntegrationSpec extends Specification implements TestDirectoryProvider {
-
-    @Rule final TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider()
+@CleanupTestDirectory
+class AbstractIntegrationSpec extends Specification {
+    @Rule
+    final TestNameTestDirectoryProvider temporaryFolder = new TestNameTestDirectoryProvider()
 
     GradleDistribution distribution = new UnderDevelopmentGradleDistribution()
     GradleExecuter executer = new GradleContextualExecuter(distribution, temporaryFolder)
+
+//    @Rule
+    M2Installation m2 = new M2Installation(temporaryFolder)
 
     ExecutionResult result
     ExecutionFailure failure
@@ -56,11 +65,15 @@ class AbstractIntegrationSpec extends Specification implements TestDirectoryProv
         testDirectory.file('settings.gradle')
     }
 
+    protected TestNameTestDirectoryProvider getTestDirectoryProvider() {
+        temporaryFolder
+    }
+
     TestFile getTestDirectory() {
         temporaryFolder.testDirectory
     }
 
-    protected TestFile file(Object... path) {
+    TestFile file(Object... path) {
         if (path.length == 1 && path[0] instanceof TestFile) {
             return path[0] as TestFile
         }
@@ -88,6 +101,11 @@ class AbstractIntegrationSpec extends Specification implements TestDirectoryProv
         executer
     }
 
+    protected GradleExecuter requireGradleHome() {
+        executer.requireGradleHome()
+        executer
+    }
+
     /**
      * Synonym for succeeds()
      */
@@ -100,7 +118,7 @@ class AbstractIntegrationSpec extends Specification implements TestDirectoryProv
     }
 
     protected GradleExecuter withDebugLogging() {
-        executer.withArguments("-d")
+        executer.withArgument("-d")
     }
 
     protected ExecutionResult succeeds(String... tasks) {
@@ -110,26 +128,26 @@ class AbstractIntegrationSpec extends Specification implements TestDirectoryProv
     protected ExecutionFailure runAndFail(String... tasks) {
         fails(*tasks)
     }
-    
+
     protected ExecutionFailure fails(String... tasks) {
         failure = executer.withTasks(*tasks).runWithFailure()
         result = failure
     }
-    
+
     protected List<String> getExecutedTasks() {
         assertHasResult()
         result.executedTasks
     }
-    
+
     protected Set<String> getSkippedTasks() {
         assertHasResult()
         result.skippedTasks
     }
-    
+
     protected List<String> getNonSkippedTasks() {
         executedTasks - skippedTasks
     }
-    
+
     protected void executedAndNotSkipped(String... tasks) {
         tasks.each {
             assert it in executedTasks
@@ -159,9 +177,25 @@ class AbstractIntegrationSpec extends Specification implements TestDirectoryProv
     protected void failureHasCause(String cause) {
         failure.assertHasCause(cause)
     }
-    
+
+    protected void failureDescriptionStartsWith(String description) {
+        failure.assertThatDescription(containsNormalizedString(description))
+    }
+
+    protected void failureDescriptionContains(String description) {
+        failure.assertThatDescription(containsNormalizedString(description))
+    }
+
+    protected void failureCauseContains(String description) {
+        failure.assertThatCause(containsNormalizedString(description))
+    }
+
+    protected Matcher<String> containsNormalizedString(String description) {
+        normalizedLineSeparators(CoreMatchers.containsString(description))
+    }
+
     private assertHasResult() {
-        assert result != null : "result is null, you haven't run succeeds()"
+        assert result != null: "result is null, you haven't run succeeds()"
     }
 
     String getOutput() {
@@ -197,6 +231,19 @@ class AbstractIntegrationSpec extends Specification implements TestDirectoryProv
         return mavenRepo
     }
 
+    public MavenFileRepository publishedMavenModules(String... modulesToPublish) {
+        modulesToPublish.each { String notation ->
+            def modules = notation.split("->").reverse()
+            def current
+            modules.each { String module ->
+                def s = new TestDependency(module)
+                def m = mavenRepo.module(s.group, s.name, s.version)
+                current = current ? m.dependsOn(current.groupId, current.artifactId, current.version).publish() : m.publish()
+            }
+        }
+        mavenRepo
+    }
+
     public IvyFileRepository ivy(TestFile repo) {
         return new IvyFileRepository(repo)
     }
@@ -227,5 +274,10 @@ class AbstractIntegrationSpec extends Specification implements TestDirectoryProv
     def createDir(String name, Closure cl) {
         TestFile root = file(name)
         root.create(cl)
+    }
+
+    void outputContains(String string) {
+        assertHasResult()
+        result.assertOutputContains(string.trim())
     }
 }

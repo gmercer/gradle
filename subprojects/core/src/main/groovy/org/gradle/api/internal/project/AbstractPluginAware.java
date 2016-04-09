@@ -1,5 +1,5 @@
 /*
- * Copyright 2013 the original author or authors.
+ * Copyright 2014 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,22 +17,27 @@
 package org.gradle.api.internal.project;
 
 import groovy.lang.Closure;
-import org.gradle.api.internal.file.FileResolver;
-import org.gradle.api.internal.initialization.ClassLoaderScope;
-import org.gradle.api.internal.initialization.ScriptHandlerFactory;
+import org.gradle.api.Action;
+import org.gradle.api.internal.ClosureBackedAction;
 import org.gradle.api.internal.plugins.DefaultObjectConfigurationAction;
-import org.gradle.api.plugins.PluginAware;
-import org.gradle.configuration.ScriptPluginFactory;
+import org.gradle.api.internal.plugins.PluginAwareInternal;
+import org.gradle.api.plugins.ObjectConfigurationAction;
+import org.gradle.api.plugins.PluginContainer;
 import org.gradle.util.ConfigureUtil;
 
 import java.util.Map;
 
-abstract public class AbstractPluginAware implements PluginAware {
+public abstract class AbstractPluginAware implements PluginAwareInternal {
 
+    @SuppressWarnings("unchecked")
     public void apply(Closure closure) {
-        DefaultObjectConfigurationAction action = createObjectConfigurationAction();
-        ConfigureUtil.configure(closure, action);
-        action.execute();
+        apply(ClosureBackedAction.of(closure));
+    }
+
+    public void apply(Action<? super ObjectConfigurationAction> action) {
+        DefaultObjectConfigurationAction configAction = createObjectConfigurationAction();
+        action.execute(configAction);
+        configAction.execute();
     }
 
     public void apply(Map<String, ?> options) {
@@ -41,16 +46,10 @@ abstract public class AbstractPluginAware implements PluginAware {
         action.execute();
     }
 
-    private DefaultObjectConfigurationAction createObjectConfigurationAction() {
-        return new DefaultObjectConfigurationAction(getFileResolver(), getScriptPluginFactory(), getScriptHandlerFactory(), getClassLoaderScope().getBase(), this);
+    public PluginContainer getPlugins() {
+        return getPluginManager().getPluginContainer();
     }
 
-    protected abstract FileResolver getFileResolver();
-
-    protected abstract ScriptPluginFactory getScriptPluginFactory();
-
-    protected abstract ScriptHandlerFactory getScriptHandlerFactory();
-
-    protected abstract ClassLoaderScope getClassLoaderScope();
+    abstract protected DefaultObjectConfigurationAction createObjectConfigurationAction();
 
 }

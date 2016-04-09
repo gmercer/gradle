@@ -16,13 +16,13 @@
 
 package org.gradle.internal.progress;
 
-import org.gradle.logging.ProgressLogger;
+import org.gradle.internal.logging.ProgressLogger;
 
 public interface LoggerProvider {
 
     ProgressLogger getLogger();
 
-    public static LoggerProvider NO_OP = new LoggerProvider() {
+    LoggerProvider NO_OP = new LoggerProvider() {
         public ProgressLogger getLogger() {
             return null;
         }

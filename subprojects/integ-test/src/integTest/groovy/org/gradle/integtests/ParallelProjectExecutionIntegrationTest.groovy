@@ -46,7 +46,8 @@ allprojects {
     }
 }
 """
-        executer.withArgument('--parallel-threads=3') // needs to be set to the maximum number of expectConcurrentExecution() calls
+        executer.withArgument('--parallel')
+        executer.withArgument('--max-workers=3') // needs to be set to the maximum number of expectConcurrentExecution() calls
         executer.withArgument('--info')
     }
 
@@ -55,7 +56,7 @@ allprojects {
 
         expect:
         blockingServer.expectConcurrentExecution(':b:pingServer', ':c:pingServer', ':d:pingServer')
-        blockingServer.expectConcurrentExecution(':a:pingServer')
+        blockingServer.expectSerialExecution(':a:pingServer')
 
         run ':a:pingServer'
     }
@@ -67,9 +68,9 @@ allprojects {
         projectDependency from: 'c', to: ['d']
 
         expect:
-        blockingServer.expectConcurrentExecution(':d:pingServer')
+        blockingServer.expectSerialExecution(':d:pingServer')
         blockingServer.expectConcurrentExecution(':b:pingServer', ':c:pingServer')
-        blockingServer.expectConcurrentExecution(':a:pingServer')
+        blockingServer.expectSerialExecution(':a:pingServer')
 
         run ':a:pingServer'
     }
@@ -98,8 +99,8 @@ allprojects {
         expect:
         //project a and b are both executed even though alphabetically more important task is blocked
         blockingServer.expectConcurrentExecution(':b:pingB', ':a:pingA')
-        blockingServer.expectConcurrentExecution(':b:pingA')
-        blockingServer.expectConcurrentExecution(':b:pingC')
+        blockingServer.expectSerialExecution(':b:pingA')
+        blockingServer.expectSerialExecution(':b:pingC')
 
         run 'b:pingC'
     }
@@ -112,7 +113,7 @@ allprojects {
 
         expect:
         blockingServer.expectConcurrentExecution(':a:pingA', ':b:pingA')
-        blockingServer.expectConcurrentExecution(':b:pingB')
+        blockingServer.expectSerialExecution(':b:pingB')
 
         run 'a:pingA', 'b:pingB'
     }

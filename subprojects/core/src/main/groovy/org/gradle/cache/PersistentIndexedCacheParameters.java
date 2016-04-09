@@ -17,8 +17,8 @@ package org.gradle.cache;
 
 import org.gradle.api.Nullable;
 import org.gradle.cache.internal.CacheDecorator;
-import org.gradle.messaging.serialize.BaseSerializerFactory;
-import org.gradle.messaging.serialize.Serializer;
+import org.gradle.internal.serialize.BaseSerializerFactory;
+import org.gradle.internal.serialize.Serializer;
 
 public class PersistentIndexedCacheParameters<K, V> {
     private static final BaseSerializerFactory SERIALIZER_FACTORY = new BaseSerializerFactory();
@@ -31,6 +31,10 @@ public class PersistentIndexedCacheParameters<K, V> {
         this.cacheName = cacheName;
         this.keySerializer = keySerializer;
         this.valueSerializer = valueSerializer;
+    }
+
+    public static <K, V> PersistentIndexedCacheParameters<K, V> of(String cacheName, Serializer<K> keySerializer, Serializer<V> valueSerializer) {
+        return new PersistentIndexedCacheParameters<K, V>(cacheName, keySerializer, valueSerializer);
     }
 
     public PersistentIndexedCacheParameters(String cacheName, Class<K> keyType, Serializer<V> valueSerializer) {

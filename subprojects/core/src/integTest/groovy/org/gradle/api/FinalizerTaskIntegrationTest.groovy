@@ -17,7 +17,6 @@
 package org.gradle.api
 
 import org.gradle.integtests.fixtures.AbstractIntegrationSpec
-import org.gradle.util.TextUtil
 import spock.lang.Ignore
 import spock.lang.Unroll
 
@@ -183,13 +182,13 @@ class FinalizerTaskIntegrationTest extends AbstractIntegrationSpec {
         fails 'a'
 
         then:
-        failure.assertHasDescription TextUtil.toPlatformLineSeparators("""Circular dependency between the following tasks:
+        failure.assertHasDescription """Circular dependency between the following tasks:
 :a
 \\--- :c
      \\--- :b
           \\--- :a (*)
 
-(*) - details omitted (listed previously)""")
+(*) - details omitted (listed previously)"""
     }
 
     void 'finalizer task can be used by multiple tasks that depend on one another'(){
@@ -213,6 +212,8 @@ class FinalizerTaskIntegrationTest extends AbstractIntegrationSpec {
 
     private void setupProject() {
         buildFile << """
+            class NotParallel extends DefaultTask {}
+
             task a {
                 finalizedBy 'b'
                 dependsOn 'c'
@@ -220,8 +221,8 @@ class FinalizerTaskIntegrationTest extends AbstractIntegrationSpec {
             task b {
                 dependsOn 'd'
             }
-            task c
-            task d
+            task c(type: NotParallel)
+            task d(type: NotParallel)
         """
     }
 

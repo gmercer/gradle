@@ -32,10 +32,11 @@ class JacocoPluginExtension {
     static final String TASK_EXTENSION_NAME = 'jacoco'
 
     Logger logger = getLogger(getClass())
+
     /**
      * Version of Jacoco JARs to use.
      */
-    String toolVersion = '0.6.2.201302030002'
+    String toolVersion = '0.7.6.201602180812'
 
     protected final Project project
 

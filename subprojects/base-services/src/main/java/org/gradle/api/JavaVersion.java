@@ -26,7 +26,7 @@ public enum JavaVersion {
 
     private final boolean hasMajorVersion;
 
-    private JavaVersion(boolean hasMajorVersion) {
+    JavaVersion(boolean hasMajorVersion) {
         this.hasMajorVersion = hasMajorVersion;
     }
 
@@ -46,14 +46,15 @@ public enum JavaVersion {
         }
 
         String name = value.toString();
-        if (name.matches("\\d")) {
-            int index = Integer.parseInt(name) - 1;
+        Matcher matcher = Pattern.compile("(\\d)(-.+)?").matcher(name);
+        if (matcher.matches()) {
+            int index = Integer.parseInt(matcher.group(1)) - 1;
             if (index < values().length && values()[index].hasMajorVersion) {
                 return values()[index];
             }
         }
 
-        Matcher matcher = Pattern.compile("1\\.(\\d)(\\D.*)?").matcher(name);
+        matcher = Pattern.compile("1\\.(\\d)(\\D.+)?").matcher(name);
         if (matcher.matches()) {
             int versionIdx = Integer.parseInt(matcher.group(1)) - 1;
             if (versionIdx >= 0 && versionIdx < values().length) {
@@ -70,6 +71,14 @@ public enum JavaVersion {
      */
     public static JavaVersion current() {
         return toVersion(System.getProperty("java.version"));
+    }
+
+    public static JavaVersion forClassVersion(int classVersion) {
+        int index = classVersion - 45; //class file versions: 1.1 == 45, 1.2 == 46...
+        if (index > 0 && index < values().length && values()[index].hasMajorVersion) {
+            return values()[index];
+        }
+        throw new IllegalArgumentException(String.format("Could not determine java version from '%d'.", classVersion));
     }
 
     public boolean isJava5() {

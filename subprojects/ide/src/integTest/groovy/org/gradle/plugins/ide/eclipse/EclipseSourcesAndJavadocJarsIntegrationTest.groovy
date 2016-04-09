@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 package org.gradle.plugins.ide.eclipse
-
 import org.gradle.plugins.ide.AbstractSourcesAndJavadocJarsIntegrationTest
 import org.gradle.test.fixtures.server.http.HttpArtifact
 
@@ -24,15 +23,18 @@ class EclipseSourcesAndJavadocJarsIntegrationTest extends AbstractSourcesAndJava
         return "eclipseClasspath"
     }
 
-    void ideFileContainsSourcesAndJavadocEntry(String sourcesClassifier = "sources", String javadocClassifier = "javadoc") {
-        def classpath = new EclipseClasspathFixture(testDirectory, executer.gradleUserHomeDir)
-        def lib = classpath.libs[0]
-        assert lib.sourcePath.endsWith("/module-1.0-${sourcesClassifier}.jar")
-        assert lib.javadocLocation.endsWith("/module-1.0-${javadocClassifier}.jar!/")
+    @Override
+    void ideFileContainsEntry(String jar, List<String> sources, List<String> javadoc) {
+        def classpath = EclipseClasspathFixture.create(testDirectory, executer.gradleUserHomeDir)
+        def lib = classpath.lib(jar)
+
+        // Eclipse only retains the first source/javadoc file
+        assert lib.sourcePath.endsWith("/${sources.get(0)}")
+        assert lib.javadocLocation.endsWith("/${javadoc.get(0)}!/")
     }
 
     void ideFileContainsNoSourcesAndJavadocEntry() {
-        def classpath = new EclipseClasspathFixture(testDirectory, executer.gradleUserHomeDir)
+        def classpath = EclipseClasspathFixture.create(testDirectory, executer.gradleUserHomeDir)
         def lib = classpath.libs[0]
         lib.assertHasNoSource()
         lib.assertHasNoJavadoc()

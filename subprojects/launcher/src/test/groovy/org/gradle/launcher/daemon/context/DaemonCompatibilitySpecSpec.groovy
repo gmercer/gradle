@@ -15,7 +15,7 @@
  */
 package org.gradle.launcher.daemon.context
 
-import org.gradle.internal.nativeplatform.ProcessEnvironment
+import org.gradle.internal.nativeintegration.ProcessEnvironment
 import org.gradle.test.fixtures.file.TestNameTestDirectoryProvider
 import org.gradle.util.ConfigureUtil
 import org.gradle.util.Requires
@@ -25,16 +25,17 @@ import spock.lang.Specification
 
 class DaemonCompatibilitySpecSpec extends Specification {
 
-    @Rule TestNameTestDirectoryProvider tmp = new TestNameTestDirectoryProvider()
+    @Rule
+    TestNameTestDirectoryProvider tmp = new TestNameTestDirectoryProvider()
 
     def clientConfigure = {}
     def serverConfigure = {}
 
-    def client(Closure c) {
+    def client(@DelegatesTo(DaemonContextBuilder) Closure c) {
         clientConfigure = c
     }
 
-    def server(Closure c) {
+    def server(@DelegatesTo(DaemonContextBuilder) Closure c) {
         serverConfigure = c
     }
 
@@ -92,6 +93,9 @@ class DaemonCompatibilitySpecSpec extends Specification {
 
         expect:
         compatible
+
+        cleanup:
+        assert link.delete()
     }
 
     def "contexts with same daemon opts are compatible"() {

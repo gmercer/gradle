@@ -18,8 +18,9 @@ package org.gradle.test.fixtures.server.http
 
 import org.gradle.internal.hash.HashUtil
 import org.gradle.test.fixtures.file.TestFile
+import org.gradle.test.fixtures.resource.RemoteArtifact
 
-abstract class HttpArtifact extends HttpResource {
+abstract class HttpArtifact extends HttpResource implements RemoteArtifact {
 
     String modulePath
 
@@ -34,10 +35,6 @@ abstract class HttpArtifact extends HttpResource {
 
     HttpResource getSha1() {
         return new BasicHttpResource(server, getSha1File(), "${path}.sha1")
-    }
-
-    URI getUri() {
-        return new URI("http", "localhost:${server.port}", path, null, null)
     }
 
     protected String getPath() {

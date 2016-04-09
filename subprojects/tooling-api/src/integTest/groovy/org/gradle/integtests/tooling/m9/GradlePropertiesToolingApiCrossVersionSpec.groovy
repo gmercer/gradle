@@ -20,26 +20,24 @@ import org.gradle.integtests.fixtures.AvailableJavaHomes
 import org.gradle.integtests.tooling.fixture.TargetGradleVersion
 import org.gradle.integtests.tooling.fixture.TextUtil
 import org.gradle.integtests.tooling.fixture.ToolingApiSpecification
-import org.gradle.integtests.tooling.fixture.ToolingApiVersion
 import org.gradle.tooling.model.build.BuildEnvironment
-import spock.lang.IgnoreIf
+import org.junit.Assume
 
-@ToolingApiVersion('>=1.2')
 @TargetGradleVersion('>=1.0-milestone-9')
 class GradlePropertiesToolingApiCrossVersionSpec extends ToolingApiSpecification {
 
     def setup() {
         //this test does not make any sense in embedded mode
         //as we don't own the process
-        toolingApi.isEmbedded = false
+        toolingApi.requireDaemons()
     }
 
     def "tooling api honours jvm args specified in gradle.properties"() {
         file('build.gradle') << """
-assert java.lang.management.ManagementFactory.runtimeMXBean.inputArguments.contains('-Xmx16m')
+assert java.lang.management.ManagementFactory.runtimeMXBean.inputArguments.contains('-Xmx62m')
 assert System.getProperty('some-prop') == 'some-value'
 """
-        file('gradle.properties') << "org.gradle.jvmargs=-Dsome-prop=some-value -Xmx16m"
+        file('gradle.properties') << "org.gradle.jvmargs=-Dsome-prop=some-value -Xmx62m"
 
         when:
         BuildEnvironment env = toolingApi.withConnection { connection ->
@@ -48,13 +46,13 @@ assert System.getProperty('some-prop') == 'some-value'
         }
 
         then:
-        env.java.jvmArguments.contains('-Xmx16m')
+        env.java.jvmArguments.contains('-Xmx62m')
     }
 
-    @IgnoreIf({ AvailableJavaHomes.bestAlternative == null })
     def "tooling api honours java home specified in gradle.properties"() {
-        File javaHome = AvailableJavaHomes.bestAlternative
-        String javaHomePath = TextUtil.escapeString(javaHome.canonicalPath)
+        def jdk = AvailableJavaHomes.getAvailableJdk { targetDist.isToolingApiTargetJvmSupported(it.javaVersion) }
+        Assume.assumeNotNull(jdk)
+        String javaHomePath = TextUtil.escapeString(jdk.javaHome.canonicalPath)
 
         file('build.gradle') << "assert new File(System.getProperty('java.home')).canonicalPath.startsWith('$javaHomePath')"
 
@@ -67,6 +65,6 @@ assert System.getProperty('some-prop') == 'some-value'
         }
 
         then:
-        env.java.javaHome == javaHome
+        env.java.javaHome == jdk.javaHome
     }
 }

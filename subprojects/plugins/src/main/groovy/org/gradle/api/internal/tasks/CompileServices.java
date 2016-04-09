@@ -16,22 +16,33 @@
 
 package org.gradle.api.internal.tasks;
 
-import org.gradle.StartParameter;
-import org.gradle.api.internal.tasks.compile.daemon.CompilerClientsManager;
-import org.gradle.api.internal.tasks.compile.daemon.CompilerDaemonManager;
-import org.gradle.api.internal.tasks.compile.daemon.CompilerDaemonStarter;
+import org.gradle.api.internal.jvm.JvmBinaryRenderer;
 import org.gradle.api.internal.tasks.compile.daemon.InProcessCompilerDaemonFactory;
+import org.gradle.api.internal.tasks.compile.incremental.analyzer.ClassAnalysisCache;
+import org.gradle.api.internal.tasks.compile.incremental.analyzer.DefaultClassAnalysisCache;
+import org.gradle.api.internal.tasks.compile.incremental.cache.DefaultGeneralCompileCaches;
+import org.gradle.api.internal.tasks.compile.incremental.cache.GeneralCompileCaches;
+import org.gradle.api.internal.tasks.compile.incremental.jar.DefaultJarSnapshotCache;
+import org.gradle.api.internal.tasks.compile.incremental.jar.JarSnapshotCache;
+import org.gradle.api.invocation.Gradle;
+import org.gradle.cache.CacheRepository;
 import org.gradle.initialization.JdkToolsInitializer;
-import org.gradle.internal.Factory;
+import org.gradle.internal.classloader.ClassLoaderFactory;
 import org.gradle.internal.service.ServiceRegistration;
 import org.gradle.internal.service.scopes.PluginServiceRegistry;
-import org.gradle.process.internal.WorkerProcessBuilder;
 
 public class CompileServices implements PluginServiceRegistry {
     public void registerGlobalServices(ServiceRegistration registration) {
+        registration.add(JvmBinaryRenderer.class);
+    }
+
+    public void registerBuildSessionServices(ServiceRegistration registration) {
     }
 
     public void registerBuildServices(ServiceRegistration registration) {
+    }
+
+    public void registerGradleServices(ServiceRegistration registration) {
         registration.addProvider(new BuildScopeCompileServices());
     }
 
@@ -44,12 +55,20 @@ public class CompileServices implements PluginServiceRegistry {
             initializer.initializeJdkTools();
         }
 
-        CompilerDaemonManager createCompilerDaemonManager(Factory<WorkerProcessBuilder> workerFactory, StartParameter startParameter) {
-            return new CompilerDaemonManager(new CompilerClientsManager(new CompilerDaemonStarter(workerFactory, startParameter)));
+        InProcessCompilerDaemonFactory createInProcessCompilerDaemonFactory(ClassLoaderFactory classLoaderFactory, Gradle gradle) {
+            return new InProcessCompilerDaemonFactory(classLoaderFactory, gradle.getGradleUserHomeDir());
         }
 
-        InProcessCompilerDaemonFactory createInProcessCompilerDaemonFactory() {
-            return new InProcessCompilerDaemonFactory();
+        GeneralCompileCaches createGeneralCompileCaches(ClassAnalysisCache classAnalysisCache, JarSnapshotCache jarSnapshotCache) {
+            return new DefaultGeneralCompileCaches(classAnalysisCache, jarSnapshotCache);
+        }
+
+        ClassAnalysisCache createClassAnalysisCache(CacheRepository cacheRepository) {
+            return new DefaultClassAnalysisCache(cacheRepository);
+        }
+
+        JarSnapshotCache createJarSnapshotCache(CacheRepository cacheRepository) {
+            return new DefaultJarSnapshotCache(cacheRepository);
         }
     }
 }

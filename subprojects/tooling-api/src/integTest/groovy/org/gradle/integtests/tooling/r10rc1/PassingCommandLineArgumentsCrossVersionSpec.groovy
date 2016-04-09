@@ -20,12 +20,11 @@ package org.gradle.integtests.tooling.r10rc1
 
 import org.gradle.integtests.tooling.fixture.TargetGradleVersion
 import org.gradle.integtests.tooling.fixture.ToolingApiSpecification
-import org.gradle.integtests.tooling.fixture.ToolingApiVersion
 import org.gradle.tooling.ProjectConnection
 import org.gradle.tooling.exceptions.UnsupportedBuildArgumentException
+import org.gradle.tooling.exceptions.UnsupportedOperationConfigurationException
 import org.gradle.tooling.model.GradleProject
 
-@ToolingApiVersion(">=1.2")
 @TargetGradleVersion(">=1.0")
 class PassingCommandLineArgumentsCrossVersionSpec extends ToolingApiSpecification {
 
@@ -82,7 +81,7 @@ class PassingCommandLineArgumentsCrossVersionSpec extends ToolingApiSpecificatio
 
     def "can use custom log level"() {
         //logging infrastructure is not installed when running in-process to avoid issues
-        toolingApi.isEmbedded = false
+        toolingApi.requireDaemons()
 
         given:
         file("build.gradle") << """
@@ -116,13 +115,34 @@ class PassingCommandLineArgumentsCrossVersionSpec extends ToolingApiSpecificatio
         ex.message.contains('--foreground')
     }
 
+    @TargetGradleVersion(">=1.0-milestone-8 <1.0")
+    def "gives decent feedback when build arguments not supported"() {
+        when:
+        withConnection { ProjectConnection it ->
+            it.newBuild().withArguments('--foreground').run()
+        }
+
+        then:
+        UnsupportedOperationConfigurationException ex = thrown()
+        ex.message.contains("The version of Gradle you are using (${targetDist.version.version}) does not support the BuildLauncher API withArguments() configuration option. Support for this is available in Gradle 1.0 and all later versions.")
+
+        when:
+        withConnection { ProjectConnection it ->
+            it.model(GradleProject).withArguments('--foreground').get()
+        }
+
+        then:
+        UnsupportedOperationConfigurationException ex2 = thrown()
+        ex2.message.contains("The version of Gradle you are using (${targetDist.version.version}) does not support the ModelBuilder API withArguments() configuration option. Support for this is available in Gradle 1.0 and all later versions.")
+    }
+
     def "can overwrite project dir via build arguments"() {
         given:
         file('otherDir').createDir()
         file('build.gradle') << "assert projectDir.name.endsWith('otherDir')"
 
         when:
-        withConnection { 
+        withConnection {
             it.newBuild().withArguments('-p', 'otherDir').run()
         }
 

@@ -21,11 +21,11 @@ import org.gradle.launcher.daemon.context.DaemonContext
 import org.gradle.launcher.daemon.context.DefaultDaemonContext
 import org.gradle.launcher.daemon.diagnostics.DaemonStartupInfo
 import org.gradle.launcher.daemon.registry.EmbeddedDaemonRegistry
-import org.gradle.messaging.remote.Address
-import org.gradle.messaging.remote.internal.ConnectCompletion
-import org.gradle.messaging.remote.internal.ConnectException
-import org.gradle.messaging.remote.internal.Connection
-import org.gradle.messaging.remote.internal.OutgoingConnector
+import org.gradle.internal.remote.Address
+import org.gradle.internal.remote.internal.ConnectCompletion
+import org.gradle.internal.remote.internal.ConnectException
+import org.gradle.internal.remote.internal.OutgoingConnector
+import org.gradle.internal.remote.internal.RemoteConnection
 import spock.lang.Specification
 
 class DefaultDaemonConnectorTest extends Specification {
@@ -36,7 +36,7 @@ class DefaultDaemonConnectorTest extends Specification {
 
     class OutgoingConnectorStub implements OutgoingConnector {
         ConnectCompletion connect(Address address) throws ConnectException {
-            def connection = [:] as Connection
+            def connection = [:] as RemoteConnection
             // unsure why I can't add this as property in the map-mock above
             connection.metaClass.num = address.num
             return { connection } as ConnectCompletion
@@ -67,7 +67,7 @@ class DefaultDaemonConnectorTest extends Specification {
         def address = createAddress(daemonNum)
         registry.store(address, context, "password", false)
         registry.markBusy(address)
-        return new DaemonStartupInfo(daemonNum.toString(), null);
+        return new DaemonStartupInfo(daemonNum.toString(), null, null);
     }
 
     def startIdleDaemon() {
@@ -104,7 +104,7 @@ class DefaultDaemonConnectorTest extends Specification {
         given:
         startIdleDaemon()
         startIdleDaemon()
-        
+
         expect:
         def connection = connector.maybeConnect({it.pid < 12} as ExplainingSpec)
         connection && connection.connection.num < 12

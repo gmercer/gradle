@@ -15,24 +15,28 @@
  */
 package org.gradle.launcher.daemon.server;
 
-import org.gradle.internal.service.scopes.GlobalScopeServices;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
-import org.gradle.initialization.GradleLauncherFactory;
+import org.gradle.internal.classpath.ClassPath;
 import org.gradle.internal.concurrent.ExecutorFactory;
-import org.gradle.internal.nativeplatform.ProcessEnvironment;
-import org.gradle.internal.nativeplatform.services.NativeServices;
+import org.gradle.internal.nativeintegration.ProcessEnvironment;
+import org.gradle.internal.nativeintegration.services.NativeServices;
 import org.gradle.internal.service.DefaultServiceRegistry;
 import org.gradle.internal.service.ServiceRegistry;
+import org.gradle.internal.service.scopes.GlobalScopeServices;
 import org.gradle.launcher.daemon.configuration.DaemonServerConfiguration;
 import org.gradle.launcher.daemon.context.DaemonContext;
 import org.gradle.launcher.daemon.context.DaemonContextBuilder;
 import org.gradle.launcher.daemon.registry.DaemonDir;
 import org.gradle.launcher.daemon.registry.DaemonRegistry;
 import org.gradle.launcher.daemon.registry.DaemonRegistryServices;
-import org.gradle.launcher.daemon.server.exec.DaemonHygieneAction;
 import org.gradle.launcher.daemon.server.exec.DefaultDaemonCommandExecuter;
-import org.gradle.logging.LoggingManagerInternal;
+import org.gradle.launcher.daemon.server.health.DaemonHealthServices;
+import org.gradle.launcher.daemon.server.health.DefaultDaemonHealthServices;
+import org.gradle.launcher.exec.BuildExecuter;
+import org.gradle.internal.logging.LoggingManagerInternal;
+import org.gradle.internal.remote.services.MessagingServices;
+import org.gradle.internal.remote.internal.inet.InetAddressFactory;
 
 import java.io.File;
 import java.util.UUID;
@@ -45,13 +49,13 @@ public class DaemonServices extends DefaultServiceRegistry {
     private final LoggingManagerInternal loggingManager;
     private final static Logger LOGGER = Logging.getLogger(DaemonServices.class);
 
-    public DaemonServices(DaemonServerConfiguration configuration, ServiceRegistry loggingServices, LoggingManagerInternal loggingManager) {
+    public DaemonServices(DaemonServerConfiguration configuration, ServiceRegistry loggingServices, LoggingManagerInternal loggingManager, ClassPath additionalModuleClassPath) {
         super(NativeServices.getInstance(), loggingServices);
         this.configuration = configuration;
         this.loggingManager = loggingManager;
 
         addProvider(new DaemonRegistryServices(configuration.getBaseDir()));
-        addProvider(new GlobalScopeServices(true));
+        addProvider(new GlobalScopeServices(true, additionalModuleClassPath));
     }
 
     protected DaemonContext createDaemonContext() {
@@ -61,12 +65,12 @@ public class DaemonServices extends DefaultServiceRegistry {
         builder.setUid(configuration.getUid());
 
         LOGGER.debug("Creating daemon context with opts: {}", configuration.getJvmOptions());
-        
+
         builder.setDaemonOpts(configuration.getJvmOptions());
 
         return builder.create();
     }
-    
+
     public File getDaemonLogFile() {
         final DaemonContext daemonContext = get(DaemonContext.class);
         final Long pid = daemonContext.getPid();
@@ -74,18 +78,29 @@ public class DaemonServices extends DefaultServiceRegistry {
         return new File(get(DaemonDir.class).getVersionedDir(), fileName);
     }
 
-    protected Daemon createDaemon() {
+    protected DaemonHealthServices createDaemonHealthServices() {
+        return new DefaultDaemonHealthServices();
+    }
+
+    protected Daemon createDaemon(BuildExecuter buildActionExecuter) {
         return new Daemon(
-                new DaemonTcpServerConnector(),
-                get(DaemonRegistry.class),
-                get(DaemonContext.class),
-                "password",
-                new DefaultDaemonCommandExecuter(
-                        get(GradleLauncherFactory.class),
-                        get(ProcessEnvironment.class),
-                        loggingManager,
-                        getDaemonLogFile(), new DaemonHygieneAction()),
-                get(ExecutorFactory.class));
+            new DaemonTcpServerConnector(
+                get(ExecutorFactory.class),
+                get(MessagingServices.class).get(InetAddressFactory.class)
+            ),
+            get(DaemonRegistry.class),
+            get(DaemonContext.class),
+            "password",
+            new DefaultDaemonCommandExecuter(
+                buildActionExecuter,
+                this,
+                get(ProcessEnvironment.class),
+                loggingManager,
+                getDaemonLogFile(),
+                get(DaemonHealthServices.class)
+            ),
+            get(ExecutorFactory.class)
+        );
     }
 
 }

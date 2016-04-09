@@ -32,6 +32,10 @@ import spock.lang.Issue;
 
 import javax.inject.Inject;
 import java.io.IOException;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 import java.lang.reflect.*;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -291,10 +295,10 @@ public class AsmBackedClassGeneratorTest {
     @Test
     public void reportsConstructionFailure() {
         try {
-            generator.newInstance(UnconstructableBean.class);
+            generator.newInstance(UnconstructibleBean.class);
             fail();
         } catch (ObjectInstantiationException e) {
-            assertThat(e.getCause(), sameInstance(UnconstructableBean.failure));
+            assertThat(e.getCause(), sameInstance(UnconstructibleBean.failure));
         }
 
         try {
@@ -634,9 +638,6 @@ public class AsmBackedClassGeneratorTest {
         bean.getAsDynamicObject().setProperty("prop", "value2");
         assertThat(call("{ it.prop }", bean), equalTo((Object) "value2"));
 
-        bean.getAsDynamicObject().setProperty("dynamicProp", "value");
-        assertThat(call("{ it.dynamicProp }", bean), equalTo((Object) "value"));
-
         call("{ it.ext.anotherProp = 12 }", bean);
         assertThat(bean.getAsDynamicObject().getProperty("anotherProp"), equalTo((Object) 12));
         assertThat(call("{ it.anotherProp }", bean), equalTo((Object) 12));
@@ -788,6 +789,24 @@ public class AsmBackedClassGeneratorTest {
 
     @Test public void generatesDslObjectCompatibleObject() throws Exception {
         new DslObject(generator.generate(Bean.class).newInstance());
+    }
+
+    @Test
+    public void includesNotInheritedTypeAnnotations() throws IllegalAccessException, InstantiationException {
+        Class<? extends AnnotatedBean> generatedClass = generator.generate(AnnotatedBean.class);
+
+        BeanAnnotation annotation = generatedClass.getAnnotation(BeanAnnotation.class);
+        assertThat(annotation, notNullValue());
+        assertThat(annotation.value(), equalTo("test"));
+        assertThat(annotation.values(), equalTo(new String[] {"1", "2"}));
+        assertThat(annotation.enumValue(), equalTo(AnnotationEnum.A));
+        assertThat(annotation.enumValues(), equalTo(new AnnotationEnum[] {AnnotationEnum.A, AnnotationEnum.B}));
+        assertThat(annotation.number(), equalTo(1));
+        assertThat(annotation.numbers(), equalTo(new int[] {1, 2}));
+        assertThat(annotation.clazz().equals(Integer.class), equalTo(true));
+        assertThat(annotation.classes(), equalTo(new Class<?>[] {Integer.class}));
+        assertThat(annotation.annotation().value(), equalTo("nested"));
+        assertThat(annotation.annotations()[0].value(), equalTo("nested array"));
     }
 
     public static class Bean {
@@ -1216,10 +1235,10 @@ public class AsmBackedClassGeneratorTest {
         }
     }
 
-    public static class UnconstructableBean {
+    public static class UnconstructibleBean {
         static Throwable failure = new UnsupportedOperationException();
 
-        public UnconstructableBean() throws Throwable {
+        public UnconstructibleBean() throws Throwable {
             throw failure;
         }
     }
@@ -1229,5 +1248,45 @@ public class AsmBackedClassGeneratorTest {
     }
 
     private static class PrivateBean {
+    }
+
+    public enum AnnotationEnum {
+        A, B
+    }
+
+    @Retention(RetentionPolicy.RUNTIME)
+    @Target(ElementType.TYPE)
+    public static @interface NestedBeanAnnotation {
+        String value();
+    }
+
+    @Retention(RetentionPolicy.RUNTIME)
+    @Target(ElementType.TYPE)
+    public static @interface BeanAnnotation {
+        String value();
+        String[] values();
+        AnnotationEnum enumValue();
+        AnnotationEnum[] enumValues();
+        int number();
+        int[] numbers();
+        Class<?> clazz();
+        Class<?>[] classes();
+        NestedBeanAnnotation annotation();
+        NestedBeanAnnotation[] annotations();
+    }
+
+    @BeanAnnotation(
+            value = "test",
+            values = {"1", "2"},
+            enumValue = AnnotationEnum.A,
+            enumValues = {AnnotationEnum.A, AnnotationEnum.B},
+            number = 1,
+            numbers = {1, 2},
+            clazz = Integer.class,
+            classes = {Integer.class},
+            annotation = @NestedBeanAnnotation("nested"),
+            annotations = {@NestedBeanAnnotation("nested array")}
+    )
+    public static class AnnotatedBean {
     }
 }
